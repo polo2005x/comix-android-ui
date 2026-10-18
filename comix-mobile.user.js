@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.7.1
+// @version      0.7.2
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -424,7 +424,7 @@
 
   // ---------- debug readout (bottom right) ----------
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.1';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.2';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -537,7 +537,7 @@
     attachFeed();
     new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting) && userScrolledSince(lastLoadAt)) loadMore();
-    }, { rootMargin: '1500px 0px' }).observe(sentinel);
+    }, { rootMargin: `${AHEAD}px 0px` }).observe(sentinel);
   }
 
   // Only your own scrolling (finger, wheel, keys, our scroll buttons) may trigger the next
@@ -558,7 +558,6 @@
     loading = false;
     pendingSig = null;
     clearTimeout(loadTimer);
-    holdY = null;
     pageNo = 0;
     targetPage = null;
   }
@@ -591,8 +590,10 @@
     return added;
   }
 
+  // Start the next page about one screen before the end of the list.
+  const AHEAD = 900;
   function sentinelNear() {
-    return sentinel.getBoundingClientRect().top < innerHeight + 1500;
+    return sentinel.getBoundingClientRect().top < innerHeight + AHEAD;
   }
 
   // Keep page loads at a human pace; rapid paging is what the site's tool detection reacts to.
@@ -616,29 +617,16 @@
     loading = true;
     pendingSig = gridSig();
     status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : 'Loading…';
-    holdScroll();
+    // No scroll locking while it loads: the site doesn't move the page on Next, and the old
+    // "snap back down" guard trapped you at the bottom when you scrolled up mid-load.
     lastLoadAt = Date.now();
     btn.click();
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => { // give up on this attempt; the next scroll retries
       loading = false;
       targetPage = null;
-      releaseScroll(0);
       status.textContent = 'Couldn’t load more. Scroll to retry.';
     }, 12000);
-  }
-
-  // After Next, the site scrolls back up (to the top of our page).
-  // While a page loads, undo any big upward jump; normal scrolling down is allowed.
-  let holdY = null;
-  let releaseTimer;
-  function holdScroll() {
-    clearTimeout(releaseTimer);
-    holdY = getY();
-  }
-  function releaseScroll(delay) {
-    clearTimeout(releaseTimer);
-    releaseTimer = setTimeout(() => { holdY = null; }, delay);
   }
 
   // React re-renders the site's list after Next, Hot/New, filters or a view switch.
@@ -656,13 +644,10 @@
         clearTimeout(loadTimer);
         status.textContent = '';
         harvest();
-        if (holdY !== null) setY(holdY);
+        // No chaining unless jumping to a page: the next page loads only when you scroll near the end again.
         if (targetPage) {
           if (pageNo >= targetPage) finishJump(targetPage);
           else setTimeout(loadMore, 300); // one page at a time, gently
-        } else {
-          // No chaining here: the next page loads only when you scroll near the end again.
-          releaseScroll(800); // the site may scroll a moment after rendering
         }
         updateBadge();
       } else if (!seen.has(firstKey(sig))) {
@@ -738,8 +723,6 @@
   }
 
   function scrollToMark(mark) {
-    clearTimeout(releaseTimer);
-    holdY = null;
     mark.scrollIntoView({ block: 'start' });
     setTimeout(updateBadge, 50);
   }
@@ -844,13 +827,6 @@
     }
     if (isPage) scroller = null;
     else if (t instanceof Element && (t.contains(feedWrap) || t.contains(mainCol()) || t.contains($('main')))) scroller = t;
-    else return; // a carousel, our tab strip, a dropdown…
-
-    if (holdY !== null) {
-      const y = getY();
-      if (y > holdY) holdY = y;
-      else if (holdY - y > 150) setY(holdY);
-    }
   }, { capture: true, passive: true });
 
   // ---------- open titles and collections in a new tab ----------
