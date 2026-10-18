@@ -18,6 +18,7 @@ Userscript for comix.to on phones (home page and /browse):
 - **★ Browse presets** (top bar on /browse). This saves the current filters (they live in the URL) under a name. Tap a preset to load it, or ✕ to delete it. Saving with an existing name overwrites that preset.
 - **Reading progress on cards.** While you're logged in, the script remembers the "read / total" numbers from your Reading History rail. It then shows "read / latest" in place of "Ch.X" on the same titles in every tab and on Browse, highlighted when there are new chapters. Titles you've started but are behind on get a purple outline around the cover, and titles you've read up to the latest chapter are dimmed. The list grows as you read; turn it off in ⚙ → Reading progress.
 - Tapping a title or collection opens it in a new tab.
+- **Long-press a card** (right-click on desktop) to open the site's own Add to library menu: Reading, Completed, On-Hold, Plan to Read, Dropped. It appears where you pressed. On older Hot/New feed pages, the site's card for that title may no longer be on the page; you'll then see a short note to open the title instead.
 
 Only runs on `https://comix.to/` and `https://comix.to/browse`. Title and reader pages are left alone.
 
