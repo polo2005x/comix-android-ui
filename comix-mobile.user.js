@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.5.0
+// @version      0.5.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -359,7 +359,8 @@
       if (!target) return;
       settings.hidden = true;
       peekHeader();
-      target.click();
+      // Wait a frame so the revealed header has a real position, then tap it.
+      requestAnimationFrame(() => tap(target));
     });
     const hdrBox = el('input', { type: 'checkbox', checked: root.classList.contains('cx-showhdr') });
     hdrBox.addEventListener('change', () => {
@@ -393,7 +394,20 @@
     if (page() === 'home' && !homeTabs().includes(view) && homeTabs().length) setView(homeTabs()[0]);
   }
 
-  // Briefly show the hidden site header so its login / account menu can open.
+  // A full tap: menus often open on pointerdown/mousedown, which .click() alone skips.
+  function tap(target) {
+    const r = target.getBoundingClientRect();
+    const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+    const P = window.PointerEvent || MouseEvent;
+    target.dispatchEvent(new P('pointerdown', { ...at, pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: 1 }));
+    target.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }));
+    target.dispatchEvent(new P('pointerup', { ...at, pointerId: 1, pointerType: 'touch', isPrimary: true }));
+    target.dispatchEvent(new MouseEvent('mouseup', at));
+    target.click();
+  }
+
+  // Show the hidden site header until the next tap outside it, so its login /
+  // account menu can open (and can be tapped by hand if it doesn't).
   function peekHeader() {
     root.classList.add('cx-peek');
     setTimeout(() => {
