@@ -2,8 +2,10 @@
 
 Userscript for the comix.to home page:
 
-- Fixed top bar with three tabs: **Hot** and **New** (Latest Updates) and **Popular** (Most Recent Popular). Tap the active tab again to scroll to the top.
-- Hides everything else: the site header, sidebar, footer, announcements and the other home sections.
+- Fixed top bar with tabs. Tap the active tab again to scroll to the top.
+- The ⚙ button at the right of the bar picks which tabs are shown: Announcements, Most Recent Popular, Most Follows · New Comics, Latest Updates Hot, Latest Updates New, User Collections and Browse. The default is Popular, Hot and New.
+- Only the selected section is visible. The site header, sidebar, footer and other sections are hidden.
+- **Browse** opens the site's own /browse page with the same top bar, so its filters and numbered pages work as usual.
 - 3 cards per row.
 - Endless scroll on Hot and New. The script presses the site's own hidden *Next* button and appends each new page.
 - Tapping a title opens it in a new tab.
