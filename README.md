@@ -6,12 +6,14 @@ Userscript for comix.to on phones (home page and /browse):
 - **⚙ settings** (right end of the bar):
   - **Shown tabs**, in bar order. Use ▲/▼ to reorder them and untick to hide one. Hidden tabs are listed below; tick one to add it to the end of the bar.
   - Available tabs: Announcements, New Chapters from Followed Comics, Reading History, Recommended for you, Most Recent Popular, Most Follows · New Comics, Latest Updates Hot, Latest Updates New, User Collections and Browse. The signed-in sections are empty when you're logged out.
-  - **Log in / Account menu**, plus an option to always show the site's own header (search, notifications, account).
+  - **Account:** shows or hides the site's own header, pinned just under the bar. Log in, your account menu, notifications and search are all there.
   - The site's own settings: theme, content filter and content preferences.
+  - **Show debug info:** a small readout in the bottom-right corner for tracking down page-number problems.
 - Only the selected section is visible. The site header, sidebar and footer are hidden.
 - 3 cards per row. Each tab keeps the site's own ⋮ menu (timeframe, type filter, …).
-- **Endless scroll** on Hot, New and Browse. The script presses the site's own *Next* button and appends each page, with a small "Page N" divider between pages.
-- **Page N** badge, bottom left. It shows the page you're looking at. Tap it, enter a number and press Go: a loaded page scrolls into view, and on Hot/New pages further ahead are loaded one at a time. On Browse, a page that isn't loaded yet opens directly with your filters kept.
+- **Endless scroll** on Hot and New. The script presses the site's own *Next* button and appends each page, with a small "Page N" divider between pages. Loads are spaced at least 1.5 s apart.
+- Browse keeps the site's own numbered pager. Endless scroll there tripped the site's third-party detection, so it was removed.
+- **Page N** badge, bottom left. It shows the page you're looking at. Tap it, enter a number and press Go: a loaded page scrolls into view, and on Hot/New pages further ahead are loaded one at a time. On Browse, the number opens that page directly with your filters kept.
 - **★ Browse presets** (top bar on /browse). This saves the current filters (they live in the URL) under a name. Tap a preset to load it, or ✕ to delete it. Saving with an existing name overwrites that preset.
 - Tapping a title or collection opens it in a new tab.
 

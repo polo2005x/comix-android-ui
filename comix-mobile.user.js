@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.5.1
+// @version      0.6.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -69,10 +69,18 @@
   html.cx-on { --cx-bar: 48px; scroll-behavior: auto !important; }
   html.cx-on body { padding-top: var(--cx-bar) !important; }
   html.cx-on footer.footer { display: none !important; }
-  html.cx-on:not(.cx-peek):not(.cx-showhdr) header.topnav { display: none !important; }
-  /* site header, when shown, sits right under our bar */
-  html.cx-on.cx-peek header.topnav,
-  html.cx-on.cx-showhdr header.topnav { position: sticky !important; top: var(--cx-bar) !important; z-index: 2147482990 !important; }
+  html.cx-on:not(.cx-showhdr) header.topnav { display: none !important; }
+  /* site header (log in, account, notifications, search), when shown, is pinned right under our bar */
+  html.cx-on.cx-showhdr header.topnav {
+    position: fixed !important; top: var(--cx-bar) !important; left: 0 !important; right: 0 !important;
+    z-index: 2147482990 !important; transform: none !important;
+  }
+  html.cx-on.cx-showhdr body { padding-top: calc(var(--cx-bar) + var(--cx-hdr, 64px)) !important; }
+  #cx-debug {
+    position: fixed; right: 8px; bottom: 12px; z-index: 2147483000; max-width: 62vw; padding: 6px 8px;
+    background: rgba(0, 0, 0, .82); color: #8f8; font: 11px/1.35 ui-monospace, monospace; border-radius: 8px;
+    white-space: pre-wrap; pointer-events: none;
+  }
 
   /* home: show only the active section */
   html.cx-on[data-cx-page="home"] main.layout .side-col,
@@ -102,11 +110,8 @@
   html.cx-on[data-cx-page="home"]:not([data-cx-view="latest"]) .cx-keep { display: none !important; }
   #cx-feed.cx-home { display: grid; grid-template-columns: repeat(${COLS}, minmax(0, 1fr)); gap: 10px 8px; }
 
-  /* Browse: hide the site's paged results and pager once our feed has content */
-  html.cx-on[data-cx-page="browse"].cx-bfeed-on .list-wrap > div:has(> [class*="list-grid"]),
-  html.cx-on[data-cx-page="browse"].cx-bfeed-on .list-wrap > .npager { display: none !important; }
-  html.cx-on[data-cx-page="browse"] .list-grid--cards,
-  #cx-feed.list-grid--cards { display: grid !important; grid-template-columns: repeat(${COLS}, minmax(0, 1fr)) !important; gap: 10px 8px !important; }
+  /* Browse: 3 per row in grid view (the site's own numbered pager stays) */
+  html.cx-on[data-cx-page="browse"] .list-grid--cards { display: grid !important; grid-template-columns: repeat(${COLS}, minmax(0, 1fr)) !important; gap: 10px 8px !important; }
   #cx-feed .card__menu { display: none !important; }
 
   /* compact cards for 3 columns */
@@ -225,25 +230,15 @@
   };
   const browsePage = () => +($('.npager__num.is-active')?.textContent || new URL(location.href).searchParams.get('page') || 1);
 
-  // Where the endless feed reads its pages from.
-  const SOURCES = {
-    home: {
-      grid: () => $('.grid-updates', latestSec() || document),
-      items: (g) => $$('a.card', g),
-      next: () => $$('.pager__btn', latestSec() || document).find((b) => /next/i.test(b.textContent + b.getAttribute('aria-label'))),
-      active: () => isLatest(view),
-      watch: () => mainCol(),
-    },
-    browse: {
-      // our feed copies the site's grid class, so skip it
-      grid: () => $$('.list-wrap [class*="list-grid"]').find((g) => !g.closest('#cx-feed')),
-      items: (g) => [...g.children],
-      next: () => $('.list-wrap .npager__nav[aria-label="Next page"]'),
-      active: () => true,
-      watch: () => $('main') || document.body,
-    },
+  // Where the endless feed (home Hot/New only) reads its pages from.
+  // Browse has no endless scroll: paging it in the background trips the site's tool detection.
+  const src = {
+    grid: () => $('.grid-updates', latestSec() || document),
+    items: (g) => $$('a.card', g),
+    next: () => $$('.pager__btn', latestSec() || document).find((b) => /next/i.test(b.textContent + b.getAttribute('aria-label'))),
+    active: () => isLatest(view),
+    watch: () => mainCol(),
   };
-  const src = SOURCES[page()];
   const itemKey = (it) => (it.matches('a[href]') ? it : $('a[href^="/title/"]', it))?.getAttribute('href') || null;
 
   // ---------- state ----------
@@ -255,7 +250,6 @@
   let loadTimer = null;
   let pageNo = 0; // last page number added to the feed
   let targetPage = null; // go-to-page in progress (home)
-  let feedClass = '';
   let feedWrap, feed, status, sentinel, bar, tabsEl, settings, presetsPanel, pageBox, pageBtn, gotoBox, gotoInput;
 
   const gridSig = () => {
@@ -350,24 +344,26 @@
     }
     settings.append(el('p', { textContent: 'Signed-in sections (Followed, History, For you) are empty when logged out. Each tab keeps the site’s own ⋮ menu.' }));
 
+    // Login, account menu, notifications and search live in the site's own header;
+    // this shows it pinned under our bar so you can use them directly.
     settings.append(el('h3', { textContent: 'Account' }));
-    const login = $('header.topnav .login-btn');
-    const account = $('header.topnav .usermenu__btn') || $('header.topnav button[aria-label="Account menu"]');
-    const accBtn = el('button', { type: 'button', className: 'cx-wide', textContent: login ? 'Log in' : account ? 'Account menu' : 'Log in / account (not found)' });
-    accBtn.addEventListener('click', () => {
-      const target = $('header.topnav .login-btn') || $('header.topnav .usermenu__btn') || $('header.topnav button[aria-label="Account menu"]');
-      if (!target) return;
+    const shown = root.classList.contains('cx-showhdr');
+    const loggedOut = !!$('header.topnav .login-btn');
+    const hdrBtn = el('button', {
+      type: 'button',
+      className: 'cx-wide',
+      textContent: shown ? 'Hide the site header' : `Show the site header (${loggedOut ? 'Log in' : 'account'}, notifications, search)`,
+    });
+    hdrBtn.addEventListener('click', () => {
+      setHeader(!root.classList.contains('cx-showhdr'));
       settings.hidden = true;
-      peekHeader();
-      // Wait a frame so the revealed header has a real position, then tap it.
-      requestAnimationFrame(() => tap(target));
     });
-    const hdrBox = el('input', { type: 'checkbox', checked: root.classList.contains('cx-showhdr') });
-    hdrBox.addEventListener('change', () => {
-      root.classList.toggle('cx-showhdr', hdrBox.checked);
-      save(HEADER_KEY, hdrBox.checked);
-    });
-    settings.append(accBtn, el('div', { className: 'cx-row' }, el('label', {}, hdrBox, 'Always show the site’s header (search, notifications, account)')));
+    settings.append(hdrBtn, el('p', { textContent: 'The header appears just under this bar; tap Log in or your account icon there.' }));
+
+    settings.append(el('h3', { textContent: 'Troubleshooting' }));
+    const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
+    dbgBox.addEventListener('change', () => setDebug(dbgBox.checked));
+    settings.append(el('div', { className: 'cx-row' }, el('label', {}, dbgBox, 'Show debug info (for page-number problems)')));
 
     settings.append(el('h3', { textContent: 'Site' }));
     const siteBtn = el('button', { type: 'button', className: 'cx-wide', textContent: 'Theme, content filter & preferences…' });
@@ -394,30 +390,46 @@
     if (page() === 'home' && !homeTabs().includes(view) && homeTabs().length) setView(homeTabs()[0]);
   }
 
-  // A full tap: menus often open on pointerdown/mousedown, which .click() alone skips.
-  function tap(target) {
-    const r = target.getBoundingClientRect();
-    const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
-    const P = window.PointerEvent || MouseEvent;
-    target.dispatchEvent(new P('pointerdown', { ...at, pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: 1 }));
-    target.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }));
-    target.dispatchEvent(new P('pointerup', { ...at, pointerId: 1, pointerType: 'touch', isPrimary: true }));
-    target.dispatchEvent(new MouseEvent('mouseup', at));
-    target.click();
+  function setHeader(on) {
+    root.classList.toggle('cx-showhdr', on);
+    save(HEADER_KEY, on);
+    // Leave room for the header's real height once it's laid out.
+    if (on) requestAnimationFrame(() => {
+      const h = $('header.topnav')?.offsetHeight;
+      if (h) root.style.setProperty('--cx-hdr', `${h}px`);
+    });
   }
 
-  // Show the hidden site header until the next tap outside it, so its login /
-  // account menu can open (and can be tapped by hand if it doesn't).
-  function peekHeader() {
-    root.classList.add('cx-peek');
-    setTimeout(() => {
-      const off = (e) => {
-        if (e.target.closest?.('header.topnav')) return;
-        root.classList.remove('cx-peek');
-        document.removeEventListener('click', off, true);
-      };
-      document.addEventListener('click', off, true);
-    }, 300);
+  // ---------- debug readout (bottom right) ----------
+  const DEBUG_KEY = 'cx-mobile-debug';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.0';
+  let debugEl = null;
+  let debugTimer = null;
+  let lastScrollFrom = '—';
+  function setDebug(on) {
+    save(DEBUG_KEY, on);
+    clearInterval(debugTimer);
+    debugEl?.remove();
+    debugEl = null;
+    if (!on) return;
+    debugEl = el('div', { id: 'cx-debug' });
+    document.body.appendChild(debugEl);
+    const tick = () => {
+      const marks = feed ? $$('.cx-pmark', feed) : [];
+      const sr = sentinel?.getBoundingClientRect();
+      const n = src.next();
+      debugEl.textContent = [
+        `v${VERSION} ${page()} view=${view}`,
+        `scroll: ${scroller ? 'element .' + (scroller.className || scroller.tagName) : 'window'} y=${Math.round(getY())}`,
+        `last scroll event from: ${lastScrollFrom}`,
+        `pages loaded=${pageNo} marks=${marks.length} showing=${currentPage()}`,
+        `cards=${feed ? $$('a.card', feed).length : 0} loading=${loading} target=${targetPage ?? '-'}`,
+        `next btn=${n ? (n.disabled ? 'disabled' : 'ok') : 'missing'} sentinel=${sr ? Math.round(sr.top - innerHeight) : '-'}px below`,
+        `viewport=${innerWidth}x${innerHeight}`,
+      ].join('\n');
+    };
+    tick();
+    debugTimer = setInterval(tick, 500);
   }
 
   // ---------- browse presets ----------
@@ -494,8 +506,8 @@
 
   // ---------- endless feed (home Latest Updates and Browse) ----------
   function buildFeed() {
-    feedWrap = el(page() === 'home' ? 'div' : 'section', { className: 'cx-keep' });
-    feed = el('div', { id: 'cx-feed', className: page() === 'home' ? 'cx-home' : '' });
+    feedWrap = el('div', { className: 'cx-keep' });
+    feed = el('div', { id: 'cx-feed', className: 'cx-home' });
     status = el('div', { id: 'cx-status' });
     sentinel = el('div', { id: 'cx-sentinel' });
     sentinel.style.height = '1px';
@@ -507,12 +519,7 @@
   }
 
   function attachFeed() {
-    if (feedWrap.isConnected) return;
-    if (page() === 'home') { mainCol()?.appendChild(feedWrap); return; }
-    // Browse: right after the site's results block, before its pager.
-    const pager = $('.list-wrap > .npager');
-    if (pager) pager.before(feedWrap);
-    else ($('.list-wrap') || $('main'))?.appendChild(feedWrap);
+    if (feedWrap && !feedWrap.isConnected) mainCol()?.appendChild(feedWrap);
   }
 
   function resetFeed() {
@@ -525,20 +532,12 @@
     holdY = null;
     pageNo = 0;
     targetPage = null;
-    root.classList.remove('cx-bfeed-on');
   }
 
   function harvest() {
     const grid = src.grid();
     if (!grid) return 0;
-    if (page() === 'browse') {
-      // Copy the site's grid/list classes so the feed looks the same; a view switch restarts it.
-      if (feedClass && feedClass !== grid.className) resetFeed();
-      feedClass = grid.className;
-      feed.className = grid.className;
-    }
-    const num = page() === 'browse' ? browsePage() : pageNo + 1;
-    if ($(`.cx-pmark[data-page="${num}"]`, feed)) return 0; // already have this page
+    const num = pageNo + 1;
     pageNo = num;
     const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
     mark.dataset.page = num;
@@ -555,7 +554,6 @@
       feed.appendChild(c);
       added++;
     }
-    if (page() === 'browse') root.classList.add('cx-bfeed-on');
     return added;
   }
 
@@ -563,8 +561,18 @@
     return sentinel.getBoundingClientRect().top < innerHeight + 1500;
   }
 
+  // Keep page loads at a human pace; rapid paging is what the site's tool detection reacts to.
+  const MIN_GAP = 1500;
+  let lastLoadAt = 0;
+  let gapTimer = null;
+
   function loadMore() {
     if (!src.active() || loading || !feed) return;
+    const wait = lastLoadAt + MIN_GAP - Date.now();
+    if (wait > 0) {
+      if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; if (targetPage || sentinelNear()) loadMore(); }, wait);
+      return;
+    }
     const btn = src.next();
     if (!btn || btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
       status.textContent = seen.size ? `End of list (last page ${pageNo})` : '';
@@ -575,6 +583,7 @@
     pendingSig = gridSig();
     status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : 'Loading…';
     holdScroll();
+    lastLoadAt = Date.now();
     btn.click();
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => { // give up on this attempt; the next scroll retries
@@ -709,7 +718,14 @@
   let ticking = false;
   document.addEventListener('scroll', (e) => {
     const t = e.target;
-    if (t === document || t === document.documentElement || t === document.body) scroller = null;
+    const isPage = t === document || t === document.documentElement || t === document.body;
+    lastScrollFrom = isPage ? 'window' : t instanceof Element ? `${t.tagName.toLowerCase()}.${String(t.className).split(' ')[0]}` : '?';
+    // The badge reads positions on screen, so any scroll can update it.
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(() => { ticking = false; updateBadge(); });
+    }
+    if (isPage) scroller = null;
     else if (t instanceof Element && (t.contains(feedWrap) || t.contains(mainCol()) || t.contains($('main')))) scroller = t;
     else return; // a carousel, our tab strip, a dropdown…
 
@@ -717,10 +733,6 @@
       const y = getY();
       if (y > holdY) holdY = y;
       else if (holdY - y > 150) setY(holdY);
-    }
-    if (!ticking) {
-      ticking = true;
-      requestAnimationFrame(() => { ticking = false; updateBadge(); });
     }
   }, { capture: true, passive: true });
 
@@ -741,18 +753,24 @@
   function ready() {
     if (!document.body) return false;
     if (page() === 'browse') return !!$('.list-wrap');
-    return !!(mainCol() && SOURCES.home.grid() && viewEl('popular'));
+    return !!(mainCol() && src.grid() && viewEl('popular'));
   }
 
   function start() {
     buildBar();
-    buildFeed();
     buildPageBox();
-    markActive();
-    new MutationObserver(onSiteChange).observe(src.watch(), { childList: true, subtree: true });
-    if (page() === 'home' && isLatest(view)) selectLatestTab(view);
-    harvest();
-    if (sentinelNear()) loadMore();
+    if (page() === 'home') {
+      buildFeed();
+      markActive();
+      new MutationObserver(onSiteChange).observe(src.watch(), { childList: true, subtree: true });
+      if (isLatest(view)) selectLatestTab(view);
+      harvest();
+      if (sentinelNear()) loadMore();
+    }
+    if (root.classList.contains('cx-showhdr')) setHeader(true);
+    if (load(DEBUG_KEY, false)) setDebug(true);
+    // Fallback in case scroll events never reach us on some layout.
+    setInterval(updateBadge, 1000);
     updateBadge();
     // If the SPA leaves home/browse, get out of the way.
     const here = page();
