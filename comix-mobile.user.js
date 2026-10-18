@@ -6,6 +6,7 @@
 // @match        https://comix.to/*
 // @run-at       document-start
 // @grant        none
+// @inject-into  page
 // @noframes
 // @homepageURL  https://github.com/polo2005x/comix-android-ui
 // @updateURL    https://raw.githubusercontent.com/polo2005x/comix-android-ui/main/comix-mobile.user.js
@@ -238,7 +239,22 @@
   // Track whichever one is actually scrolling and use it everywhere.
   let scroller = null; // null = window
   const getY = () => (scroller ? scroller.scrollTop : window.scrollY);
-  const setY = (y) => { if (scroller) scroller.scrollTop = y; else window.scrollTo(0, y); };
+
+  // After it renders a new Latest Updates page, the site calls
+  // window.scrollTo({ top: <its section>, behavior: 'smooth' }), yanking you back up the list.
+  // Ignore the site's own scroll calls for a moment around each page we load; our own
+  // scrolling uses the untouched originals, and finger/wheel scrolling never goes through these.
+  const nativeScrollTo = window.scrollTo.bind(window);
+  let muteSiteScrollUntil = 0;
+  const muteSiteScroll = (ms) => { muteSiteScrollUntil = Math.max(muteSiteScrollUntil, Date.now() + ms); };
+  for (const name of ['scrollTo', 'scroll']) {
+    const orig = window[name].bind(window);
+    window[name] = function (...args) {
+      if (Date.now() < muteSiteScrollUntil) return;
+      return orig(...args);
+    };
+  }
+  const setY = (y) => { if (scroller) scroller.scrollTop = y; else nativeScrollTo(0, y); };
 
   // ---------- site lookups (re-queried each time; React may replace nodes) ----------
   const mainCol = () => $('main.layout .main-col');
@@ -635,14 +651,16 @@
     loading = true;
     pendingSig = gridSig();
     status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : 'Loading…';
-    // No scroll locking while it loads: the site doesn't move the page on Next, and the old
-    // "snap back down" guard trapped you at the bottom when you scrolled up mid-load.
+    // Your own scrolling is never locked (an old "snap back down" guard trapped you at the
+    // bottom); only the site's jump to its section is ignored.
     lastLoadAt = Date.now();
+    muteSiteScroll(15000); // until the page arrives (see nativeScrollTo); shortened once it's in
     btn.click();
     clearTimeout(loadTimer);
     loadTimer = setTimeout(() => { // give up on this attempt; the next scroll retries
       loading = false;
       targetPage = null;
+      muteSiteScrollUntil = Date.now() + 2000;
       status.textContent = 'Couldn’t load more. Scroll to retry.';
     }, 12000);
   }
@@ -662,6 +680,7 @@
         clearTimeout(loadTimer);
         status.textContent = '';
         harvest();
+        muteSiteScrollUntil = Date.now() + 3000; // the site's jump comes just after it renders
         // No chaining unless jumping to a page: the next page loads only when you scroll near the end again.
         if (targetPage) {
           if (pageNo >= targetPage) finishJump(targetPage);
