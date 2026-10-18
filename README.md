@@ -16,7 +16,7 @@ Userscript for comix.to on phones (home page and /browse):
 - Browse keeps the site's own numbered pager. Endless scroll there tripped the site's third-party detection, so it was removed.
 - **Page N** badge, bottom left. It shows the page you're looking at. Tap it, enter a number and press Go: a loaded page scrolls into view, and on Hot/New pages further ahead are loaded one at a time. On Browse, the number opens that page directly with your filters kept.
 - **★ Browse presets** (top bar on /browse). This saves the current filters (they live in the URL) under a name. Tap a preset to load it, or ✕ to delete it. Saving with an existing name overwrites that preset.
-- **Reading progress on cards.** While you're logged in, the script remembers the "read / total" numbers from your Reading History rail. It then shows "read / latest" in place of "Ch.X" on the same titles in every tab and on Browse, highlighted when there are new chapters. The list grows as you read; turn it off in ⚙ → Reading progress.
+- **Reading progress on cards.** While you're logged in, the script remembers the "read / total" numbers from your Reading History rail. It then shows "read / latest" in place of "Ch.X" on the same titles in every tab and on Browse, highlighted when there are new chapters. Titles you've started but are behind on get a purple outline around the cover, and titles you've read up to the latest chapter are dimmed. The list grows as you read; turn it off in ⚙ → Reading progress.
 - Tapping a title or collection opens it in a new tab.
 
 Only runs on `https://comix.to/` and `https://comix.to/browse`. Title and reader pages are left alone.

@@ -145,7 +145,9 @@
   }
   .card__ch[data-cx-read].cx-new::before { color: #a99cff; font-weight: 700; }
   /* whole card: started but behind = outlined cover; read up to the latest = dimmed */
-  a.card[data-cx-state="behind"] .card__poster-wrap { outline: 2px solid #8b7cff; outline-offset: 2px; border-radius: 8px; }
+  a.card[data-cx-state="behind"] .card__poster-wrap {
+    outline: 3px solid #8b7cff; outline-offset: 2px; border-radius: 8px; box-shadow: 0 0 14px 2px rgba(139, 124, 255, .55);
+  }
   a.card[data-cx-state="caught"] { opacity: .5; filter: grayscale(.6); }
   a.card[data-cx-state="caught"]:hover, a.card[data-cx-state="caught"]:focus-visible { opacity: .85; }
 
