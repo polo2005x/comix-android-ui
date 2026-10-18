@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.3.0
+// @version      0.4.0
 // @description  Sticky tab bar with configurable home sections, 3-column grid, endless Latest Updates, titles open in new tabs.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -104,7 +104,7 @@
     background: rgba(14, 14, 18, .94); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid rgba(255, 255, 255, .08);
   }
-  #cx-tabs { flex: 1; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  #cx-tabs { flex: 1 1 0; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
   #cx-tabs::-webkit-scrollbar { display: none; }
   #cx-bar button {
     border: 0; border-radius: 8px; background: transparent; color: #cfcfd6;
@@ -112,8 +112,48 @@
   }
   #cx-tabs button { flex: 1 0 auto; padding: 0 10px; }
   #cx-bar button.is-on { background: rgba(255, 255, 255, .12); color: #fff; }
-  #cx-cog { flex: 0 0 36px; display: grid; place-items: center; padding: 0; }
-  #cx-cog svg { width: 20px; height: 20px; }
+  #cx-cog {
+    flex: 0 0 36px; width: 36px; min-width: 36px; max-width: 36px; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center; padding: 0 !important; margin: 0;
+  }
+  #cx-cog svg { width: 20px; height: 20px; flex: none; }
+  /* the site's own settings dialog opens at the top; let it cover our bar */
+  html.cx-on body:has(.settings-dialog) #cx-bar,
+  html.cx-on body:has(.settings-dialog) #cx-pagebox { z-index: 100; }
+
+  /* browse: 3 per row in grid view */
+  html.cx-on[data-cx-page="browse"] .list-grid--cards {
+    grid-template-columns: repeat(${COLS}, minmax(0, 1fr)) !important; gap: 10px 8px !important;
+  }
+  html.cx-on[data-cx-page="browse"] .list-grid--cards a.card { min-width: 0; }
+  html.cx-on[data-cx-page="browse"] .list-grid--cards .card__title { font-size: 12px !important; line-height: 1.25 !important; }
+  html.cx-on[data-cx-page="browse"] .list-grid--cards .card__meta { font-size: 10.5px !important; gap: 4px !important; }
+
+  /* page markers in the endless feed */
+  .cx-pmark { grid-column: 1 / -1; scroll-margin-top: calc(var(--cx-bar) + 8px); font: 600 12px system-ui, sans-serif; opacity: .5; padding: 6px 2px 0; }
+  .cx-pmark[data-page="1"] { padding: 0; font-size: 0; }
+
+  /* page badge + go-to box, bottom left */
+  #cx-pagebox { position: fixed; left: 10px; bottom: 12px; z-index: 2147483000; font: 600 13px system-ui, sans-serif; }
+  #cx-pagebox[hidden] { display: none; }
+  #cx-pagebtn {
+    border: 1px solid rgba(255, 255, 255, .14); border-radius: 999px; padding: 8px 14px;
+    background: rgba(20, 20, 26, .92); color: #e6e6ec; font: inherit; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  }
+  #cx-goto {
+    position: absolute; left: 0; bottom: calc(100% + 8px); display: flex; gap: 6px; padding: 8px;
+    background: #1b1b22; border: 1px solid rgba(255, 255, 255, .12); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+  }
+  #cx-goto[hidden] { display: none; }
+  #cx-goto input {
+    width: 72px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18);
+    background: #111116; color: #fff; font: inherit;
+  }
+  #cx-goto button { padding: 8px 14px; border: 0; border-radius: 8px; background: #8b7cff; color: #fff; font: inherit; }
+  #cx-settings .cx-site-btn {
+    width: 100%; margin-top: 4px; padding: 10px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 8px;
+    background: rgba(255, 255, 255, .06); color: inherit; font: inherit; text-align: left;
+  }
 
   /* settings panel */
   #cx-settings {
@@ -155,7 +195,9 @@
   let loading = false;
   let pendingSig = null;
   let loadTimer = null;
-  let feed, status, sentinel, bar, tabsEl, panel;
+  let pageNo = 0; // pages harvested into the feed
+  let targetPage = null; // go-to-page in progress
+  let feed, status, sentinel, bar, tabsEl, panel, pageBox, pageBtn, gotoBox, gotoInput;
 
   const gridSig = () => $$('a.card', latestGrid() || document.createElement('div')).slice(0, 4).map((a) => a.getAttribute('href')).join('|');
 
@@ -198,6 +240,23 @@
     const note = document.createElement('p');
     note.textContent = 'Each tab keeps the site’s own ⋮ menu (timeframe, type) at the top right.';
     panel.appendChild(note);
+
+    // The site's own settings dialog (theme, content filter, content preferences),
+    // opened through its hidden header button.
+    const siteHead = document.createElement('h3');
+    siteHead.textContent = 'Site';
+    siteHead.style.marginTop = '14px';
+    const siteBtn = document.createElement('button');
+    siteBtn.type = 'button';
+    siteBtn.className = 'cx-site-btn';
+    siteBtn.textContent = 'Theme, content filter & preferences…';
+    siteBtn.addEventListener('click', () => {
+      panel.hidden = true;
+      const native = $('header.topnav button[aria-label="Settings"]');
+      if (native) native.click();
+      else siteBtn.textContent = 'Site settings button not found';
+    });
+    panel.append(siteHead, siteBtn);
     panel.addEventListener('click', (e) => e.stopPropagation());
     document.body.appendChild(panel);
     document.addEventListener('click', () => { panel.hidden = true; });
@@ -251,6 +310,7 @@
     }
     for (const b of $$('button', tabsEl)) b.classList.toggle('is-on', b.dataset.view === view);
     root.dataset.cxView = isLatest(view) ? 'latest' : view;
+    updateBadge();
   }
 
   function setView(v) {
@@ -281,11 +341,19 @@
     pendingSig = null;
     clearTimeout(loadTimer);
     holdY = null;
+    pageNo = 0;
+    targetPage = null;
   }
 
   function harvest() {
     const grid = latestGrid();
     if (!grid) return 0;
+    pageNo++;
+    const mark = document.createElement('div');
+    mark.className = 'cx-pmark';
+    mark.dataset.page = pageNo;
+    mark.textContent = `Page ${pageNo}`;
+    feed.appendChild(mark);
     let added = 0;
     for (const a of $$('a.card', grid)) {
       const href = a.getAttribute('href');
@@ -309,12 +377,13 @@
     if (!isLatest(view) || loading) return;
     const btn = nextBtn();
     if (!btn || btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
-      status.textContent = seen.size ? 'No more updates' : '';
+      status.textContent = seen.size ? `No more updates (last page is ${pageNo})` : '';
+      if (targetPage) finishJump(pageNo);
       return;
     }
     loading = true;
     pendingSig = gridSig();
-    status.textContent = 'Loading…';
+    status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : 'Loading…';
     holdScroll();
     btn.click();
     clearTimeout(loadTimer);
@@ -358,8 +427,14 @@
         status.textContent = '';
         harvest();
         if (holdY !== null) window.scrollTo(0, holdY);
-        releaseScroll(800); // the site may scroll a moment after rendering
-        if (sentinelNear()) loadMore();
+        if (targetPage) {
+          if (pageNo >= targetPage) finishJump(targetPage);
+          else setTimeout(loadMore, 300); // one page at a time, gently
+        } else {
+          releaseScroll(800); // the site may scroll a moment after rendering
+          if (sentinelNear()) loadMore();
+        }
+        updateBadge();
       } else if (!seen.has(sig.split('|')[0])) {
         // A grid we didn't ask for (type filter or Hot/New change): start over.
         resetFeed();
@@ -367,6 +442,96 @@
         if (sentinelNear()) loadMore();
       }
     }, 120);
+  }
+
+  // ---------- page badge + go to page (bottom left) ----------
+  const browsePage = () => +($('.npager__num.is-active')?.textContent || new URL(location.href).searchParams.get('page') || 1);
+
+  function currentPage() {
+    if (page() === 'browse') return browsePage();
+    if (!feed) return 1;
+    let p = 1;
+    for (const m of $$('.cx-pmark', feed)) {
+      if (m.getBoundingClientRect().top <= innerHeight * 0.35) p = +m.dataset.page;
+      else break;
+    }
+    return p;
+  }
+
+  function updateBadge() {
+    if (!pageBtn) return;
+    const text = `Page ${currentPage()}`;
+    if (pageBtn.textContent !== text) pageBtn.textContent = text; // avoid feeding the browse observer
+    const hide = page() === 'home' && !isLatest(view);
+    if (pageBox.hidden !== hide) pageBox.hidden = hide;
+  }
+
+  function buildPageBox() {
+    pageBox = document.createElement('div');
+    pageBox.id = 'cx-pagebox';
+    pageBtn = document.createElement('button');
+    pageBtn.id = 'cx-pagebtn';
+    pageBtn.type = 'button';
+    gotoBox = document.createElement('form');
+    gotoBox.id = 'cx-goto';
+    gotoBox.hidden = true;
+    gotoInput = document.createElement('input');
+    gotoInput.type = 'number';
+    gotoInput.min = '1';
+    gotoInput.inputMode = 'numeric';
+    gotoInput.placeholder = 'Page';
+    const go = document.createElement('button');
+    go.type = 'submit';
+    go.textContent = 'Go';
+    gotoBox.append(gotoInput, go);
+    pageBox.append(gotoBox, pageBtn);
+    document.body.appendChild(pageBox);
+
+    pageBtn.addEventListener('click', () => {
+      gotoBox.hidden = !gotoBox.hidden;
+      if (!gotoBox.hidden) { gotoInput.value = ''; gotoInput.placeholder = String(currentPage()); gotoInput.focus(); }
+    });
+    gotoBox.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const n = Math.floor(+gotoInput.value);
+      if (n >= 1) { gotoBox.hidden = true; gotoInput.blur(); goToPage(n); }
+    });
+    pageBox.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { gotoBox.hidden = true; });
+
+    let ticking = false;
+    window.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => { ticking = false; updateBadge(); });
+    }, { passive: true });
+    if (page() === 'browse') new MutationObserver(updateBadge).observe(document.body, { childList: true, subtree: true });
+    updateBadge();
+  }
+
+  function goToPage(n) {
+    if (page() === 'browse') { // the site's browse page opens on ?page=N and keeps the filters
+      const u = new URL(location.href);
+      u.searchParams.set('page', n);
+      location.assign(u);
+      return;
+    }
+    if (!isLatest(view)) return;
+    const mark = $(`.cx-pmark[data-page="${n}"]`, feed);
+    if (mark) { holdY = null; mark.scrollIntoView({ block: 'start' }); return; }
+    // Not loaded yet: page through with the site's Next button until we get there.
+    targetPage = n;
+    if (!loading) loadMore();
+    else status.textContent = `Loading page ${pageNo + 1} of ${targetPage}…`;
+  }
+
+  function finishJump(n) {
+    targetPage = null;
+    clearTimeout(releaseTimer);
+    holdY = null;
+    status.textContent = '';
+    $(`.cx-pmark[data-page="${n}"]`, feed)?.scrollIntoView({ block: 'start' });
+    updateBadge();
   }
 
   // ---------- open titles and collections in a new tab ----------
@@ -390,6 +555,7 @@
 
   function start() {
     buildBar();
+    buildPageBox();
     if (page() === 'home') {
       buildFeed();
       markActive();
