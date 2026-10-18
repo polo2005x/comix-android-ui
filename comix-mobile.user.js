@@ -560,34 +560,52 @@
     clearTimeout(loadTimer);
     pageNo = 0;
     targetPage = null;
+    feedListKey = null;
   }
 
   // The site writes the real page number into the URL (?page=N) before it renders the
   // new cards, so label pages with that instead of counting (counting drifted).
   const sitePage = () => +(new URL(location.href).searchParams.get('page') || 1);
 
+  // Which list the feed shows: the URL without its page number (Hot vs ?tab=New, filters).
+  const listKey = () => { const u = new URL(location.href); u.searchParams.delete('page'); return u.search; };
+  let feedListKey = null;
+
+  // Add the cards from the site's current grid that the feed doesn't have yet. The site often
+  // renders a page twice (quickly, then with refreshed data), so a page can arrive in parts.
   function harvest() {
     const grid = src.grid();
     if (!grid) return 0;
+    if (feedListKey === null) feedListKey = listKey();
     const num = sitePage();
-    if ($(`.cx-pmark[data-page="${num}"]`, feed)) return 0; // already have this page
-    pageNo = num;
-    const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
-    mark.dataset.page = num;
-    if (!feed.firstChild) mark.classList.add('cx-first');
-    feed.appendChild(mark);
-    let added = 0;
-    for (const it of src.items(grid)) {
-      const key = itemKey(it);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
+    const fresh = src.items(grid).filter((it) => { const k = itemKey(it); return k && !seen.has(k); });
+    pageNo = Math.max(pageNo, num);
+    if (!fresh.length) return 0;
+    if (!$(`.cx-pmark[data-page="${num}"]`, feed)) {
+      const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
+      mark.dataset.page = num;
+      if (!feed.firstChild) mark.classList.add('cx-first');
+      feed.appendChild(mark);
+    }
+    for (const it of fresh) {
+      seen.add(itemKey(it));
       const c = it.cloneNode(true);
       $$('.card__menu', c).forEach((m) => m.remove()); // its "add to library" handler doesn't survive cloning
       for (const a of c.matches('a') ? [c] : $$('a[href^="/title/"]', c)) { a.target = '_blank'; a.rel = 'noopener'; }
       feed.appendChild(c);
-      added++;
     }
-    return added;
+    return fresh.length;
+  }
+
+  // A different list (Hot/New switch, filter change) rather than more of the same one?
+  function isNewList() {
+    if (listKey() !== feedListKey) return true;
+    const grid = src.grid();
+    const keys = grid ? src.items(grid).map(itemKey).filter(Boolean) : [];
+    if (!keys.length) return false;
+    // Same address and same-or-earlier page, but almost nothing we've seen: a filter changed.
+    const known = keys.filter((k) => seen.has(k)).length;
+    return sitePage() <= pageNo && known / keys.length < 0.3 && sitePage() < 2;
   }
 
   // Start the next page about one screen before the end of the list.
@@ -650,14 +668,12 @@
           else setTimeout(loadMore, 300); // one page at a time, gently
         }
         updateBadge();
-      } else if (!seen.has(firstKey(sig))) {
-        if (pageNo > 0 && sitePage() > pageNo) {
-          // A later page we didn't ask for (something else pressed Next): keep it, don't wipe.
+      } else if (!seen.has(firstKey(sig)) || src.items(src.grid()).some((it) => !seen.has(itemKey(it)))) {
+        if (isNewList()) {
+          resetFeed(); // a different list: start over
           harvest();
         } else {
-          // Back to an earlier page (Hot/New or type filter switch): start over.
-          resetFeed();
-          harvest();
+          harvest(); // same list: a refreshed or later page; just add what's new
         }
         updateBadge();
       }
