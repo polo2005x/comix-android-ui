@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.6.1
+// @version      0.6.2
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -405,7 +405,7 @@
 
   // ---------- debug readout (bottom right) ----------
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.1';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.2';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -537,10 +537,15 @@
     targetPage = null;
   }
 
+  // The site writes the real page number into the URL (?page=N) before it renders the
+  // new cards, so label pages with that instead of counting (counting drifted).
+  const sitePage = () => +(new URL(location.href).searchParams.get('page') || 1);
+
   function harvest() {
     const grid = src.grid();
     if (!grid) return 0;
-    const num = pageNo + 1;
+    const num = sitePage();
+    if ($(`.cx-pmark[data-page="${num}"]`, feed)) return 0; // already have this page
     pageNo = num;
     const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
     mark.dataset.page = num;
