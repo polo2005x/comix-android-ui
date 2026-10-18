@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.7.2
+// @version      0.8.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -20,6 +20,8 @@
   const TABS_KEY = 'cx-mobile-tabs'; // shown tab keys, in bar order
   const HEADER_KEY = 'cx-mobile-header'; // show the site's own header
   const PRESETS_KEY = 'cx-browse-presets';
+  const PROGRESS_KEY = 'cx-read-progress'; // { "/title/…": { r: read, t: total, at } } from Reading History
+  const SHOW_PROGRESS_KEY = 'cx-mobile-progress';
   const COLS = 3;
 
   // `title` finds the home section by the start of its heading.
@@ -132,6 +134,16 @@
   /* Browse: 3 per row in grid view (the site's own numbered pager stays) */
   html.cx-on[data-cx-page="browse"] .list-grid--cards { display: grid !important; grid-template-columns: repeat(${COLS}, minmax(0, 1fr)) !important; gap: 10px 8px !important; }
   #cx-feed .card__menu { display: none !important; }
+
+  /* reading progress ("read / latest") in place of "Ch.X" for titles in your Reading History.
+     The site's text stays in place (hidden); the label is drawn from an attribute, so the
+     site's own page code never sees its card changed. */
+  .card__ch[data-cx-read] { font-size: 0 !important; }
+  .card__ch[data-cx-read]::before {
+    content: attr(data-cx-read); font-size: 10.5px; padding-left: 15px;
+    background: no-repeat left center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  }
+  .card__ch[data-cx-read].cx-new::before { color: #a99cff; font-weight: 700; }
 
   /* compact cards for 3 columns */
   html.cx-on .cx-active a.card, #cx-feed a.card, .list-grid--cards a.card { min-width: 0; }
@@ -398,6 +410,18 @@
     });
     settings.append(hdrBtn, el('p', { textContent: 'The header appears just under this bar; tap Log in or your account icon there.' }));
 
+    settings.append(el('h3', { textContent: 'Reading progress' }));
+    const progBox = el('input', { type: 'checkbox', checked: showProgress });
+    progBox.addEventListener('change', () => {
+      showProgress = progBox.checked;
+      save(SHOW_PROGRESS_KEY, showProgress);
+      decorateProgress();
+    });
+    settings.append(
+      el('div', { className: 'cx-row' }, el('label', {}, progBox, 'Show read / latest chapter on cards')),
+      el('p', { textContent: `Learned from your Reading History while logged in (${Object.keys(progress).length} titles so far). Highlighted when there are new chapters.` }),
+    );
+
     settings.append(el('h3', { textContent: 'Troubleshooting' }));
     const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
     dbgBox.addEventListener('change', () => setDebug(dbgBox.checked));
@@ -439,8 +463,61 @@
   }
 
   // ---------- debug readout (bottom right) ----------
+  // ---------- reading progress ----------
+  // The Reading History rail (home, logged in) shows "read / total" per title. Remember it on
+  // this device and show it on the same titles everywhere else, instead of "Ch.X".
+  let progress = load(PROGRESS_KEY, {});
+  let showProgress = load(SHOW_PROGRESS_KEY, true);
+  const progressRe = /(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/;
+
+  function collectHistory() {
+    const sec = sectionTitled('Reading History');
+    if (!sec) return;
+    let changed = false;
+    for (const a of $$('a.card', sec)) {
+      const href = a.getAttribute('href');
+      const m = $('.card__ch', a)?.textContent.match(progressRe);
+      if (!href || !m) continue;
+      const old = progress[href];
+      if (!old || old.r !== +m[1] || old.t !== +m[2]) {
+        progress[href] = { r: +m[1], t: +m[2], at: Date.now() };
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const keys = Object.keys(progress);
+    if (keys.length > 3000) { // keep the most recently seen
+      keys.sort((a, b) => progress[a].at - progress[b].at).slice(0, keys.length - 3000).forEach((k) => delete progress[k]);
+    }
+    save(PROGRESS_KEY, progress);
+  }
+
+  function decorateProgress(scope = document) {
+    for (const a of $$('main a.card', scope)) {
+      const ch = $('.card__ch', a);
+      if (!ch) continue;
+      const text = ch.textContent;
+      const p = showProgress && !progressRe.test(text) ? progress[a.getAttribute('href')] : null; // History cards already show it
+      if (!p) {
+        if (ch.hasAttribute('data-cx-read')) { ch.removeAttribute('data-cx-read'); ch.classList.remove('cx-new'); }
+        continue;
+      }
+      const latestM = text.match(/(\d+(?:\.\d+)?)/); // "Ch.1245" on the card is the newest chapter
+      const latest = latestM ? +latestM[1] : p.t;
+      const label = `${p.r} / ${latest}`;
+      if (ch.getAttribute('data-cx-read') !== label) ch.setAttribute('data-cx-read', label);
+      ch.classList.toggle('cx-new', p.r < latest);
+    }
+  }
+
+  let progressTimer;
+  const refreshProgress = () => {
+    clearTimeout(progressTimer);
+    progressTimer = setTimeout(() => { collectHistory(); decorateProgress(); }, 150);
+  };
+
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.2';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.0';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -672,6 +749,7 @@
     debounce = setTimeout(() => {
       attachFeed();
       markActive();
+      refreshProgress();
       const sig = gridSig();
       if (!sig) return; // still loading / skeleton / empty
       if (loading) {
@@ -895,7 +973,11 @@
       if (isLatest(view)) selectLatestTab(view);
       harvest();
       if (sentinelNear()) loadMore();
+    } else {
+      // Browse: keep its cards labelled as results and pages change.
+      new MutationObserver(refreshProgress).observe($('main') || document.body, { childList: true, subtree: true });
     }
+    refreshProgress();
     if (root.classList.contains('cx-showhdr')) setHeader(true);
     if (load(DEBUG_KEY, false)) setDebug(true);
     // Fallback in case scroll events never reach us on some layout.
