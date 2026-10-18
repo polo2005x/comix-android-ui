@@ -1,19 +1,21 @@
 # Comix Mobile Feed
 
-Userscript for the comix.to home page:
+Userscript for comix.to on phones (home page and /browse):
 
 - Fixed top bar with tabs. Tap the active tab again to scroll to the top.
-- The ⚙ button at the right of the bar picks which tabs are shown: Announcements, Most Recent Popular, Most Follows · New Comics, Latest Updates Hot, Latest Updates New, User Collections and Browse. The default is Popular, Hot and New.
-- Only the selected section is visible. The site header, sidebar, footer and other sections are hidden.
-- **Browse** opens the site's own /browse page with the same top bar, so its filters and numbered pages work as usual. Its grid view shows 3 per row.
-- The ⚙ panel also has a button for the site's own settings: theme, content filter and content preferences.
-- A **Page N** badge in the bottom-left corner shows which page you're on. Tap it, type a number and press Go to jump there. On Hot/New, pages you haven't loaded yet are fetched one at a time until you get there. On Browse it opens that page with your filters kept.
-- 3 cards per row.
-- Endless scroll on Hot and New. The script presses the site's own hidden *Next* button and appends each new page.
-- Tapping a title opens it in a new tab.
-- The site's own filter menu (⋮) stays visible: type filter on Hot/New, timeframe on Popular.
+- **⚙ settings** (right end of the bar):
+  - **Shown tabs**, in bar order. Use ▲/▼ to reorder them and untick to hide one. Hidden tabs are listed below; tick one to add it to the end of the bar.
+  - Available tabs: Announcements, New Chapters from Followed Comics, Reading History, Recommended for you, Most Recent Popular, Most Follows · New Comics, Latest Updates Hot, Latest Updates New, User Collections and Browse. The signed-in sections are empty when you're logged out.
+  - **Log in / Account menu**, plus an option to always show the site's own header (search, notifications, account).
+  - The site's own settings: theme, content filter and content preferences.
+- Only the selected section is visible. The site header, sidebar and footer are hidden.
+- 3 cards per row. Each tab keeps the site's own ⋮ menu (timeframe, type filter, …).
+- **Endless scroll** on Hot, New and Browse. The script presses the site's own *Next* button and appends each page, with a small "Page N" divider between pages.
+- **Page N** badge, bottom left. It shows the page you're looking at. Tap it, enter a number and press Go: a loaded page scrolls into view, and on Hot/New pages further ahead are loaded one at a time. On Browse, a page that isn't loaded yet opens directly with your filters kept.
+- **★ Browse presets** (top bar on /browse). This saves the current filters (they live in the URL) under a name. Tap a preset to load it, or ✕ to delete it. Saving with an existing name overwrites that preset.
+- Tapping a title or collection opens it in a new tab.
 
-Only runs on `https://comix.to/`. Title and reader pages are left alone.
+Only runs on `https://comix.to/` and `https://comix.to/browse`. Title and reader pages are left alone.
 
 ## Install on Firefox for Android
 
@@ -28,6 +30,7 @@ The script's `@updateURL` points at this repo. Violentmonkey checks for updates 
 
 ## Notes
 
-- Popular shows the 50 entries the site provides for the chosen timeframe. The site doesn't page this list.
-- Hot/New pages come from the site's own app, because its API requires a signature that only its own code adds.
-- If comix.to renames its CSS classes (`.grid-updates`, `.pager__btn`, `a.card`, `section.section`), update the lookups near the top of the script.
+- Popular, Follows and the signed-in rails show what the site provides for them; those lists aren't paged.
+- Hot/New and Browse pages come from the site's own app, because its API requires a signature that only its own code adds.
+- Settings and presets are saved in the browser's storage for comix.to, so clearing that site's data resets them.
+- If comix.to renames its CSS classes (`.grid-updates`, `.pager__btn`, `.npager`, `.list-grid`, `a.card`, `section.section`), update the lookups near the top of the script.
