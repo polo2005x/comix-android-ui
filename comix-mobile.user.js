@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.8.0
+// @version      0.8.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -144,6 +144,10 @@
     background: no-repeat left center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
   }
   .card__ch[data-cx-read].cx-new::before { color: #a99cff; font-weight: 700; }
+  /* whole card: started but behind = outlined cover; read up to the latest = dimmed */
+  a.card[data-cx-state="behind"] .card__poster-wrap { outline: 2px solid #8b7cff; outline-offset: 2px; border-radius: 8px; }
+  a.card[data-cx-state="caught"] { opacity: .5; filter: grayscale(.6); }
+  a.card[data-cx-state="caught"]:hover, a.card[data-cx-state="caught"]:focus-visible { opacity: .85; }
 
   /* compact cards for 3 columns */
   html.cx-on .cx-active a.card, #cx-feed a.card, .list-grid--cards a.card { min-width: 0; }
@@ -500,6 +504,7 @@
       const p = showProgress && !progressRe.test(text) ? progress[a.getAttribute('href')] : null; // History cards already show it
       if (!p) {
         if (ch.hasAttribute('data-cx-read')) { ch.removeAttribute('data-cx-read'); ch.classList.remove('cx-new'); }
+        if (a.hasAttribute('data-cx-state')) a.removeAttribute('data-cx-state');
         continue;
       }
       const latestM = text.match(/(\d+(?:\.\d+)?)/); // "Ch.1245" on the card is the newest chapter
@@ -507,6 +512,9 @@
       const label = `${p.r} / ${latest}`;
       if (ch.getAttribute('data-cx-read') !== label) ch.setAttribute('data-cx-read', label);
       ch.classList.toggle('cx-new', p.r < latest);
+      // Whole-card state: outlined while behind, dimmed once caught up.
+      const state = p.r < latest ? 'behind' : 'caught';
+      if (a.getAttribute('data-cx-state') !== state) a.setAttribute('data-cx-state', state);
     }
   }
 
@@ -517,7 +525,7 @@
   };
 
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.0';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.1';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
