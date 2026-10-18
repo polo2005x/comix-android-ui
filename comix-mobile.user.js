@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.6.0
+// @version      0.6.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -149,9 +149,12 @@
     display: flex; align-items: center; justify-content: center; padding: 0 !important; margin: 0;
   }
   #cx-bar .cx-icon svg { width: 20px; height: 20px; flex: none; }
-  /* the site's own dialogs open at the top; let them cover our UI */
-  html.cx-on body:has(.settings-dialog) #cx-bar,
-  html.cx-on body:has(.settings-dialog) #cx-pagebox { z-index: 100; }
+  /* the site's own dialogs (settings, sign-in at z-index 200) cover the whole screen; drop our UI below them */
+  html.cx-on body:has(> .settings-dialog, > .auth) #cx-bar,
+  html.cx-on body:has(> .settings-dialog, > .auth) #cx-pagebox,
+  html.cx-on body:has(> .settings-dialog, > .auth) #cx-debug,
+  html.cx-on body:has(> .settings-dialog, > .auth) .cx-panel { z-index: 100 !important; }
+  html.cx-on.cx-showhdr body:has(> .settings-dialog, > .auth) header.topnav { z-index: 100 !important; }
 
   /* popover panels (settings, presets) */
   .cx-panel {
@@ -402,7 +405,7 @@
 
   // ---------- debug readout (bottom right) ----------
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.0';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.1';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
