@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.8.1
+// @version      0.8.2
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -43,6 +43,26 @@
   const isLatest = (v) => v === 'hot' || v === 'new';
 
   const page = () => (location.pathname === '/' ? 'home' : location.pathname === '/browse' ? 'browse' : null);
+
+  // The site is a single-page app: clicking the logo on a title page switches to the home page
+  // without loading it, so the script never got to start there. Watch the address on every
+  // comix.to page, and reload once when the site switches into home or Browse that way.
+  {
+    let lastPath = location.pathname;
+    const check = () => {
+      const path = location.pathname;
+      if (path === lastPath) return;
+      lastPath = path;
+      if (page()) location.reload();
+    };
+    for (const name of ['pushState', 'replaceState']) {
+      const orig = history[name];
+      history[name] = function (...args) { const r = orig.apply(this, args); check(); return r; };
+    }
+    window.addEventListener('popstate', check);
+    setInterval(check, 500);
+  }
+
   if (!page()) return;
 
   // Only one copy per page. With the script installed in two managers (e.g. Tampermonkey
@@ -527,7 +547,7 @@
   };
 
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.1';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.2';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
