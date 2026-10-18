@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.7.0
+// @version      0.7.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -41,6 +41,12 @@
 
   const page = () => (location.pathname === '/' ? 'home' : location.pathname === '/browse' ? 'browse' : null);
   if (!page()) return;
+
+  // Only one copy per page. With the script installed in two managers (e.g. Tampermonkey
+  // and Violentmonkey), each copy treated the other's page loads as a restart and wiped its list.
+  // The mark lives on the DOM, which both managers share.
+  if (document.documentElement.hasAttribute('data-cx-loaded')) return;
+  document.documentElement.setAttribute('data-cx-loaded', '');
 
   const load = (k, fallback) => { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch (_) { return fallback; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
@@ -418,7 +424,7 @@
 
   // ---------- debug readout (bottom right) ----------
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.0';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.1';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -660,10 +666,14 @@
         }
         updateBadge();
       } else if (!seen.has(firstKey(sig))) {
-        // A list we didn't ask for (filters, Hot/New, view switch): start over.
-        resetFeed();
-        harvest();
-        if (sentinelNear()) loadMore();
+        if (pageNo > 0 && sitePage() > pageNo) {
+          // A later page we didn't ask for (something else pressed Next): keep it, don't wipe.
+          harvest();
+        } else {
+          // Back to an earlier page (Hot/New or type filter switch): start over.
+          resetFeed();
+          harvest();
+        }
         updateBadge();
       }
     }, 120);
