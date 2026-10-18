@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.8.2
+// @version      0.9.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -170,6 +170,15 @@
   }
   a.card[data-cx-state="caught"] { opacity: .5; filter: grayscale(.6); }
   a.card[data-cx-state="caught"]:hover, a.card[data-cx-state="caught"]:focus-visible { opacity: .85; }
+
+  /* long-press a card -> the site's own "Add to library" menu (placed at your finger) */
+  html.cx-on main a.card { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .card__menu-pop { z-index: 2147483002 !important; }
+  #cx-toast {
+    position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 2147483002; max-width: calc(100vw - 32px);
+    padding: 10px 14px; border-radius: 10px; background: rgba(20, 20, 26, .95); color: #e6e6ec;
+    font: 13px system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); pointer-events: none;
+  }
 
   /* compact cards for 3 columns */
   html.cx-on .cx-active a.card, #cx-feed a.card, .list-grid--cards a.card { min-width: 0; }
@@ -547,7 +556,7 @@
   };
 
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.8.2';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.9.0';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -971,6 +980,52 @@
     if (isPage) scroller = null;
     else if (t instanceof Element && (t.contains(feedWrap) || t.contains(mainCol()) || t.contains($('main')))) scroller = t;
   }, { capture: true, passive: true });
+
+  // ---------- long-press a card: the site's "Add to library" menu ----------
+  // A long press on a link fires "contextmenu" (right-click on desktop). Use it to press the
+  // card's own (hidden) library button, then move the site's menu to where you pressed.
+  function toast(text) {
+    $('#cx-toast')?.remove();
+    const t = el('div', { id: 'cx-toast', textContent: text });
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2600);
+  }
+
+  function libraryButtonFor(a) {
+    if (!a.closest('#cx-feed')) { const own = $('.card__action--menu', a); if (own) return own; }
+    // Feed cards are copies: use the site's own card for the same title if it's on the page.
+    const href = a.getAttribute('href');
+    for (const c of $$('main a.card')) {
+      if (c.closest('#cx-feed') || c.getAttribute('href') !== href) continue;
+      const b = $('.card__action--menu', c);
+      if (b) return b;
+    }
+    return null;
+  }
+
+  function placeMenu(x, y) {
+    const pop = $$('.card__menu-pop').pop();
+    if (!pop) return;
+    const r = pop.getBoundingClientRect();
+    const left = Math.max(8, Math.min(x - r.width / 2, innerWidth - r.width - 8));
+    const top = Math.max(56, Math.min(y + 10, innerHeight - r.height - 8));
+    for (const [k, v] of [['left', `${left}px`], ['top', `${top}px`], ['right', 'auto'], ['bottom', 'auto'], ['transform', 'none']]) {
+      pop.style.setProperty(k, v, 'important');
+    }
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    if (!root.classList.contains('cx-on')) return;
+    const a = e.target.closest?.('main a.card');
+    if (!a) return;
+    e.preventDefault();
+    const btn = libraryButtonFor(a);
+    if (!btn) { toast('Open this title to add it to your library'); return; }
+    navigator.vibrate?.(15);
+    const { clientX: x, clientY: y } = e;
+    btn.click();
+    requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y)));
+  }, true);
 
   // ---------- open titles and collections in a new tab ----------
   // Let the browser follow the link natively as target=_blank (window.open() gets
