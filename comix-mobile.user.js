@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.6.2
+// @version      0.7.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -67,6 +67,9 @@
   // ---------- styles ----------
   const css = `
   html.cx-on { --cx-bar: 48px; scroll-behavior: auto !important; }
+  /* No scroll anchoring: at the bottom the browser anchored to the "Loading…" line and dragged
+     the view down with every new page, which loaded the next page, and so on. */
+  html.cx-on, html.cx-on body, #cx-status, #cx-sentinel { overflow-anchor: none !important; }
   html.cx-on body { padding-top: var(--cx-bar) !important; }
   html.cx-on footer.footer { display: none !important; }
   html.cx-on:not(.cx-showhdr) header.topnav { display: none !important; }
@@ -76,8 +79,17 @@
     z-index: 2147482990 !important; transform: none !important;
   }
   html.cx-on.cx-showhdr body { padding-top: calc(var(--cx-bar) + var(--cx-hdr, 64px)) !important; }
+  /* Top / Up / Down buttons, bottom right; hold Up/Down to keep scrolling */
+  #cx-nav { position: fixed; right: 10px; bottom: 12px; z-index: 2147483000; display: flex; flex-direction: column; gap: 8px; }
+  #cx-nav button {
+    width: 44px; height: 44px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255, 255, 255, .14); background: rgba(20, 20, 26, .88); color: #e6e6ec;
+    font: 600 16px system-ui, sans-serif; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  #cx-nav button:active, #cx-nav button.is-held { background: rgba(139, 124, 255, .55); }
   #cx-debug {
-    position: fixed; right: 8px; bottom: 12px; z-index: 2147483000; max-width: 62vw; padding: 6px 8px;
+    position: fixed; right: 64px; bottom: 12px; z-index: 2147483000; max-width: 62vw; padding: 6px 8px;
     background: rgba(0, 0, 0, .82); color: #8f8; font: 11px/1.35 ui-monospace, monospace; border-radius: 8px;
     white-space: pre-wrap; pointer-events: none;
   }
@@ -153,6 +165,7 @@
   html.cx-on body:has(> .settings-dialog, > .auth) #cx-bar,
   html.cx-on body:has(> .settings-dialog, > .auth) #cx-pagebox,
   html.cx-on body:has(> .settings-dialog, > .auth) #cx-debug,
+  html.cx-on body:has(> .settings-dialog, > .auth) #cx-nav,
   html.cx-on body:has(> .settings-dialog, > .auth) .cx-panel { z-index: 100 !important; }
   html.cx-on.cx-showhdr body:has(> .settings-dialog, > .auth) header.topnav { z-index: 100 !important; }
 
@@ -405,7 +418,7 @@
 
   // ---------- debug readout (bottom right) ----------
   const DEBUG_KEY = 'cx-mobile-debug';
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.6.2';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.7.0';
   let debugEl = null;
   let debugTimer = null;
   let lastScrollFrom = '—';
@@ -517,9 +530,16 @@
     feedWrap.append(feed, status, sentinel);
     attachFeed();
     new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMore();
+      if (entries.some((e) => e.isIntersecting) && userScrolledSince(lastLoadAt)) loadMore();
     }, { rootMargin: '1500px 0px' }).observe(sentinel);
   }
+
+  // Only your own scrolling (finger, wheel, keys, our scroll buttons) may trigger the next
+  // page, so nothing keeps loading while you're not touching the page.
+  let lastUserInput = 0;
+  const noteInput = () => { lastUserInput = Date.now(); };
+  for (const type of ['touchmove', 'wheel', 'keydown']) window.addEventListener(type, noteInput, { capture: true, passive: true });
+  const userScrolledSince = (t) => lastUserInput > t;
 
   function attachFeed() {
     if (feedWrap && !feedWrap.isConnected) mainCol()?.appendChild(feedWrap);
@@ -578,7 +598,7 @@
     if (!src.active() || loading || !feed) return;
     const wait = lastLoadAt + MIN_GAP - Date.now();
     if (wait > 0) {
-      if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; if (targetPage || sentinelNear()) loadMore(); }, wait);
+      if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; if (targetPage || (sentinelNear() && userScrolledSince(lastLoadAt))) loadMore(); }, wait);
       return;
     }
     const btn = src.next();
@@ -635,8 +655,8 @@
           if (pageNo >= targetPage) finishJump(targetPage);
           else setTimeout(loadMore, 300); // one page at a time, gently
         } else {
+          // No chaining here: the next page loads only when you scroll near the end again.
           releaseScroll(800); // the site may scroll a moment after rendering
-          if (sentinelNear()) loadMore();
         }
         updateBadge();
       } else if (!seen.has(firstKey(sig))) {
@@ -722,6 +742,81 @@
     updateBadge();
   }
 
+  // ---------- Top / Up / Down buttons (bottom right) ----------
+  // Tap Up/Down: one screen. Hold: keep scrolling, speeding up. Top: jump to the top.
+  function buildNav() {
+    const mk = (label, text) => {
+      const b = el('button', { type: 'button', textContent: text });
+      b.setAttribute('aria-label', label);
+      return b;
+    };
+    const top = mk('Go to top', '⤒');
+    const up = mk('Scroll up', '▲');
+    const down = mk('Scroll down', '▼');
+    const nav = el('div', { id: 'cx-nav' }, top, up, down);
+    document.body.appendChild(nav);
+    top.addEventListener('click', () => setY(0));
+    holdToScroll(up, -1);
+    holdToScroll(down, 1);
+    nav.addEventListener('contextmenu', (e) => e.preventDefault()); // no long-press menu
+  }
+
+  // Movement is timer-based in px per second, so it runs at the same speed whatever
+  // the frame rate (animation frames and smooth scrolling can be throttled).
+  let tapAnim = null;
+  function glideBy(dist, ms = 220) {
+    clearInterval(tapAnim);
+    const from = getY();
+    const t0 = performance.now();
+    tapAnim = setInterval(() => {
+      const k = Math.min(1, (performance.now() - t0) / ms);
+      setY(Math.max(0, from + dist * (1 - (1 - k) * (1 - k)))); // ease-out
+      if (k >= 1) clearInterval(tapAnim);
+    }, 16);
+  }
+
+  function holdToScroll(btn, dir) {
+    let timer = null;
+    let holdTimer = null;
+    let held = false;
+    const stop = () => {
+      clearTimeout(holdTimer);
+      clearInterval(timer);
+      timer = null;
+      btn.classList.remove('is-held');
+    };
+    const startHold = () => {
+      held = true;
+      btn.classList.add('is-held');
+      clearInterval(tapAnim);
+      const t0 = performance.now();
+      let last = t0;
+      timer = setInterval(() => {
+        const now = performance.now();
+        const speed = Math.min(700 + (now - t0) * 1.2, 2600); // px/s, speeding up over ~1.5 s
+        noteInput();
+        setY(Math.max(0, getY() + dir * speed * (now - last) / 1000));
+        last = now;
+      }, 16);
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      held = false;
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      holdTimer = setTimeout(startHold, 220);
+    });
+    btn.addEventListener('pointerup', () => {
+      const wasHeld = held;
+      stop();
+      held = false;
+      if (!wasHeld) { // a tap: one screen
+        noteInput();
+        glideBy(dir * Math.round(innerHeight * 0.85));
+      }
+    });
+    btn.addEventListener('pointercancel', () => { stop(); held = false; });
+  }
+
   // ---------- scrolling (window or inner element) ----------
   let ticking = false;
   document.addEventListener('scroll', (e) => {
@@ -731,7 +826,11 @@
     // The badge reads positions on screen, so any scroll can update it.
     if (!ticking) {
       ticking = true;
-      requestAnimationFrame(() => { ticking = false; updateBadge(); });
+      requestAnimationFrame(() => {
+        ticking = false;
+        updateBadge();
+        if (feed && !loading && sentinelNear() && userScrolledSince(lastLoadAt)) loadMore();
+      });
     }
     if (isPage) scroller = null;
     else if (t instanceof Element && (t.contains(feedWrap) || t.contains(mainCol()) || t.contains($('main')))) scroller = t;
@@ -767,6 +866,7 @@
   function start() {
     buildBar();
     buildPageBox();
+    buildNav();
     if (page() === 'home') {
       buildFeed();
       markActive();
