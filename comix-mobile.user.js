@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.3
+// @version      0.9.4
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -732,8 +732,9 @@
     if (!fresh.length) return 0;
     // Pages stay in order: an earlier page (Previous) goes in before the next loaded one.
     const after = $$('.cx-pmark', feed).find((m) => +m.dataset.page > num) || null;
-    // Inserting above where you're reading would push the page down; keep your place.
-    const shiftFrom = after && after.getBoundingClientRect().top < 0 ? after.getBoundingClientRect().top : null;
+    // Inserting above what's on screen would push it down; keep it where it is (the new
+    // page lands above, out of view, until you scroll up to it).
+    const shiftFrom = after && after.getBoundingClientRect().top < innerHeight ? after.getBoundingClientRect().top : null;
     if (!$(`.cx-pmark[data-page="${num}"]`, feed)) {
       const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
       mark.dataset.page = num;
