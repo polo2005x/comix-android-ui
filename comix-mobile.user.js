@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.4
+// @version      0.9.5
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -407,7 +407,12 @@
   }
 
   function onTab(key) {
-    if (key === view) { setY(0); return; }
+    if (key === view) {
+      // Hot/New scrolled or opened past page 1: start that list over, as a fresh visit would.
+      if (page() === 'home' && isLatest(view) && feed && (firstPage() > 1 || pageNo > 1 || sitePage() > 1)) { openAtPage(1); return; }
+      setY(0);
+      return;
+    }
     if (key === 'browse') { location.href = '/browse'; return; }
     if (page() !== 'home') { save(VIEW_KEY, key); location.href = '/'; return; }
     setView(key);
@@ -709,6 +714,7 @@
     pageNo = 0;
     targetPage = null;
     earlierTarget = null;
+    upEndless = false;
     feedListKey = null;
   }
 
@@ -764,7 +770,7 @@
     } else {
       if (!row) {
         const prev = el('button', { type: 'button', className: 'cx-earlier' });
-        prev.addEventListener('click', () => { if (!earlierTarget && !loading) { earlierTarget = firstPage() - 1; updateEarlier(); loadEarlier(); } });
+        prev.addEventListener('click', () => { upEndless = true; startEarlier(); });
         const restart = el('button', { type: 'button', className: 'cx-restart', textContent: 'Start from page 1' });
         restart.addEventListener('click', () => openAtPage(1));
         row = el('div', { className: 'cx-earlier-row' }, prev, restart);
@@ -774,6 +780,17 @@
       $('.cx-restart', row).hidden = first <= 2;
     }
     marks.forEach((m, i) => m.classList.toggle('cx-first', i === 0 && !row)); // the top divider shows under the row
+  }
+
+  // After the first tap, scrolling up near the top loads the page before on its own,
+  // the same way scrolling down loads the next one.
+  let upEndless = false;
+  const topNear = () => { const row = feed && $('.cx-earlier-row', feed); return !!row && row.getBoundingClientRect().bottom > -AHEAD; };
+  function startEarlier() {
+    if (earlierTarget || loading || firstPage() <= 1) return;
+    earlierTarget = firstPage() - 1;
+    updateEarlier();
+    loadEarlier();
   }
 
   function loadEarlier() {
@@ -1064,6 +1081,7 @@
         ticking = false;
         updateBadge();
         if (feed && !loading && sentinelNear() && userScrolledSince(lastLoadAt)) loadMore();
+        else if (feed && !loading && upEndless && topNear() && userScrolledSince(lastLoadAt)) startEarlier();
       });
     }
     if (isPage) scroller = null;

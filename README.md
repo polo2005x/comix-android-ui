@@ -2,7 +2,7 @@
 
 Userscript for comix.to on phones (home page and /browse):
 
-- Fixed top bar with tabs. Tap the active tab again to scroll to the top.
+- Fixed top bar with tabs. Tap the active tab again to go back to its start: on Hot/New that reopens the list at page 1 (if you're past it), elsewhere it scrolls to the top.
 - **⚙ settings** (right end of the bar):
   - **Shown tabs**, in bar order. Use ▲/▼ to reorder them and untick to hide one. Hidden tabs are listed below; tick one to add it to the end of the bar.
   - Available tabs: Announcements, New Chapters from Followed Comics, Reading History, Recommended for you, Most Recent Popular, Most Follows · New Comics, Latest Updates Hot, Latest Updates New, User Collections and Browse. The signed-in sections are empty when you're logged out.
@@ -13,7 +13,7 @@ Userscript for comix.to on phones (home page and /browse):
 - 3 cards per row. Each tab keeps the site's own ⋮ menu (timeframe, type filter, …).
 - **Endless scroll** on Hot and New. The script presses the site's own *Next* button and appends each page, with a small "Page N" divider between pages (numbered like the site's own pages). A page only loads when you scroll near the end yourself, never while you leave the page alone, and loads are at least 1.5 s apart.
 - **Top / ▲ / ▼ buttons**, bottom right. Tap ▲ or ▼ to move one screen, or hold to keep scrolling (it speeds up). ⤒ jumps to the top.
-- **Links with a page number** (`?page=4`, also `?tab=New&page=4`) open the Hot/New feed at that page and keep scrolling from there. The site writes the page into the address as you scroll, so reloading picks up where you were. At the top of the feed, **↑ Load page N** adds the page before (one per tap, using the site's Previous button) above what you have, while what you're looking at stays put, and **Start from page 1** reopens the feed from the beginning. After loading earlier pages, the next scroll past the end steps the site forward past pages you already have, which can take a few seconds.
+- **Links with a page number** (`?page=4`, also `?tab=New&page=4`) open the Hot/New feed at that page and keep scrolling from there. The site writes the page into the address as you scroll, so reloading picks up where you were. At the top of the feed, **↑ Load page N** adds the page before (one per tap, using the site's Previous button) above what you have, while what you're looking at stays put. After that first tap, scrolling up near the top loads the page before by itself, like scrolling down does. and **Start from page 1** reopens the feed from the beginning. After loading earlier pages, the next scroll past the end steps the site forward past pages you already have, which can take a few seconds.
 - Browse keeps the site's own numbered pager. Endless scroll there tripped the site's third-party detection, so it was removed.
 - **Page N** badge, bottom left. It shows the page you're looking at. Tap it, enter a number and press Go: a loaded page scrolls into view, and on Hot/New pages further ahead are loaded one at a time. On Browse, the number opens that page directly with your filters kept.
 - **★ Browse presets** (top bar on /browse). This saves the current filters (they live in the URL) under a name. Tap a preset to load it, or ✕ to delete it. Saving with an existing name overwrites that preset.
