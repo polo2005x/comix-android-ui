@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.1
+// @version      0.9.2
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -79,14 +79,9 @@
   const barTabs = () => enabled;
   const homeTabs = () => barTabs().filter((k) => k !== 'browse');
 
-  // Always start Latest Updates from page 1; the site keeps ?page=N in the URL.
-  if (page() === 'home') {
-    const u = new URL(location.href);
-    if (u.searchParams.has('page')) {
-      u.searchParams.delete('page');
-      history.replaceState(history.state, '', u);
-    }
-  }
+  // Latest Updates starts on the URL's ?page=N (the site renders that page itself), so a
+  // link or reload to ?page=4 opens the feed at page 4. The page before it is one tap away.
+  const startPage = () => Math.max(1, Math.floor(+(new URL(location.href).searchParams.get('page') || 1)) || 1);
 
   const root = document.documentElement;
   root.classList.add('cx-on');
@@ -202,6 +197,11 @@
   }
   .cx-pmark::before, .cx-pmark::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, .14); }
   .cx-pmark.cx-first { margin: 0; height: 0; overflow: hidden; }
+  .cx-earlier {
+    grid-column: 1 / -1; margin: 2px 0 6px; padding: 9px 12px; border-radius: 10px; cursor: pointer;
+    border: 1px dashed rgba(139, 124, 255, .6); background: rgba(139, 124, 255, .12); color: #c9c0ff;
+    font: 600 13px system-ui, sans-serif;
+  }
 
   /* top bar */
   #cx-bar {
@@ -724,7 +724,14 @@
     if (!$(`.cx-pmark[data-page="${num}"]`, feed)) {
       const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
       mark.dataset.page = num;
-      if (!feed.firstChild) mark.classList.add('cx-first');
+      if (!feed.firstChild) {
+        mark.classList.add('cx-first');
+        if (num > 1 && page() === 'home') { // opened partway in (?page=N): offer the pages before
+          const back = el('button', { type: 'button', className: 'cx-earlier', textContent: `↑ Start from page 1 (pages 1–${num - 1} not loaded)` });
+          back.addEventListener('click', () => openAtPage(1));
+          feed.appendChild(back);
+        }
+      }
       feed.appendChild(mark);
     }
     for (const it of fresh) {
@@ -875,11 +882,19 @@
       return;
     }
     if (!isLatest(view)) return;
+    if (n < firstPage()) { openAtPage(n); return; } // before where this feed started: reopen there
     if (n <= pageNo) return;
     // Not loaded yet: page forward with the site's Next button until we get there.
     targetPage = n;
     if (!loading) loadMore();
     else status.textContent = `Loading page ${pageNo + 1} of ${targetPage}…`;
+  }
+
+  const firstPage = () => +($('.cx-pmark', feed || document)?.dataset.page || 1);
+  function openAtPage(n) {
+    const u = new URL(location.href);
+    if (n > 1) u.searchParams.set('page', n); else u.searchParams.delete('page');
+    location.assign(u);
   }
 
   function scrollToMark(mark) {
@@ -1061,9 +1076,16 @@
     buildNav();
     if (page() === 'home') {
       buildFeed();
+      // Opened on ?page=N: show the Hot/New list the site opened on, rather than clicking our
+      // saved tab (which would send the site back to page 1).
+      if (startPage() > 1) {
+        const on = $$('.filter-btn.is-active', latestSec() || document).map((b) => b.textContent.trim().toLowerCase()).find(isLatest);
+        if (on && homeTabs().includes(on)) view = on;
+        else if (!isLatest(view)) view = homeTabs().find(isLatest) || view;
+      }
       markActive();
       new MutationObserver(onSiteChange).observe(src.watch(), { childList: true, subtree: true });
-      if (isLatest(view)) selectLatestTab(view);
+      if (isLatest(view) && startPage() === 1) selectLatestTab(view);
       harvest();
       if (sentinelNear()) loadMore();
     } else {
