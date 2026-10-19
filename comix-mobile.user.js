@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.2
+// @version      0.9.3
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -197,8 +197,14 @@
   }
   .cx-pmark::before, .cx-pmark::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, .14); }
   .cx-pmark.cx-first { margin: 0; height: 0; overflow: hidden; }
+  .cx-earlier-row { grid-column: 1 / -1; display: flex; gap: 8px; margin: 2px 0 0; }
+  .cx-earlier-row button[hidden] { display: none; }
+  .cx-restart {
+    padding: 9px 12px; border-radius: 10px; cursor: pointer; border: 1px solid rgba(255, 255, 255, .16);
+    background: transparent; color: #9a9aa6; font: 600 13px system-ui, sans-serif;
+  }
   .cx-earlier {
-    grid-column: 1 / -1; margin: 2px 0 6px; padding: 9px 12px; border-radius: 10px; cursor: pointer;
+    flex: 1; padding: 9px 12px; border-radius: 10px; cursor: pointer;
     border: 1px dashed rgba(139, 124, 255, .6); background: rgba(139, 124, 255, .12); color: #c9c0ff;
     font: 600 13px system-ui, sans-serif;
   }
@@ -329,6 +335,7 @@
     grid: () => $('.grid-updates', latestSec() || document),
     items: (g) => $$('a.card', g),
     next: () => $$('.pager__btn', latestSec() || document).find((b) => /next/i.test(b.textContent + b.getAttribute('aria-label'))),
+    prev: () => $$('.pager__btn', latestSec() || document).find((b) => /prev/i.test(b.textContent + b.getAttribute('aria-label'))),
     active: () => isLatest(view),
     watch: () => mainCol(),
   };
@@ -343,6 +350,7 @@
   let loadTimer = null;
   let pageNo = 0; // last page number added to the feed
   let targetPage = null; // go-to-page in progress (home)
+  let earlierTarget = null; // loading an earlier page with the site's Previous button
   let feedWrap, feed, status, sentinel, bar, tabsEl, settings, presetsPanel, pageBox, pageBtn, gotoBox, gotoInput;
 
   const gridSig = () => {
@@ -700,6 +708,7 @@
     clearTimeout(loadTimer);
     pageNo = 0;
     targetPage = null;
+    earlierTarget = null;
     feedListKey = null;
   }
 
@@ -721,27 +730,74 @@
     const fresh = src.items(grid).filter((it) => { const k = itemKey(it); return k && !seen.has(k); });
     pageNo = Math.max(pageNo, num);
     if (!fresh.length) return 0;
+    // Pages stay in order: an earlier page (Previous) goes in before the next loaded one.
+    const after = $$('.cx-pmark', feed).find((m) => +m.dataset.page > num) || null;
+    // Inserting above where you're reading would push the page down; keep your place.
+    const shiftFrom = after && after.getBoundingClientRect().top < 0 ? after.getBoundingClientRect().top : null;
     if (!$(`.cx-pmark[data-page="${num}"]`, feed)) {
       const mark = el('div', { className: 'cx-pmark', textContent: `Page ${num}` });
       mark.dataset.page = num;
-      if (!feed.firstChild) {
-        mark.classList.add('cx-first');
-        if (num > 1 && page() === 'home') { // opened partway in (?page=N): offer the pages before
-          const back = el('button', { type: 'button', className: 'cx-earlier', textContent: `↑ Start from page 1 (pages 1–${num - 1} not loaded)` });
-          back.addEventListener('click', () => openAtPage(1));
-          feed.appendChild(back);
-        }
-      }
-      feed.appendChild(mark);
+      feed.insertBefore(mark, after);
     }
     for (const it of fresh) {
       seen.add(itemKey(it));
       const c = it.cloneNode(true);
       $$('.card__menu', c).forEach((m) => m.remove()); // its "add to library" handler doesn't survive cloning
       for (const a of c.matches('a') ? [c] : $$('a[href^="/title/"]', c)) { a.target = '_blank'; a.rel = 'noopener'; }
-      feed.appendChild(c);
+      feed.insertBefore(c, after);
     }
+    if (shiftFrom !== null) setY((scroller ? scroller.scrollTop : scrollY) + after.getBoundingClientRect().top - shiftFrom);
+    updateEarlier();
     return fresh.length;
+  }
+
+  // Opened partway in (?page=N): a row at the top loads the page before, one per tap, with the
+  // site's own Previous button, or starts over from page 1.
+  function updateEarlier() {
+    const marks = $$('.cx-pmark', feed);
+    const first = marks.length ? +marks[0].dataset.page : 1;
+    let row = $('.cx-earlier-row', feed);
+    if (page() !== 'home' || first <= 1) {
+      row?.remove();
+      row = null;
+    } else {
+      if (!row) {
+        const prev = el('button', { type: 'button', className: 'cx-earlier' });
+        prev.addEventListener('click', () => { if (!earlierTarget && !loading) { earlierTarget = firstPage() - 1; updateEarlier(); loadEarlier(); } });
+        const restart = el('button', { type: 'button', className: 'cx-restart', textContent: 'Start from page 1' });
+        restart.addEventListener('click', () => openAtPage(1));
+        row = el('div', { className: 'cx-earlier-row' }, prev, restart);
+        feed.prepend(row);
+      }
+      $('.cx-earlier', row).textContent = earlierTarget ? `Loading page ${earlierTarget}…` : `↑ Load page ${first - 1}`;
+      $('.cx-restart', row).hidden = first <= 2;
+    }
+    marks.forEach((m, i) => m.classList.toggle('cx-first', i === 0 && !row)); // the top divider shows under the row
+  }
+
+  function loadEarlier() {
+    if (!earlierTarget || !feed) return;
+    if (loading) return; // a forward page is on its way; the row stays tappable after
+    const wait = lastLoadAt + MIN_GAP - Date.now();
+    if (wait > 0) { setTimeout(loadEarlier, wait); return; }
+    const btn = src.prev();
+    if (!btn || btn.disabled || btn.getAttribute('aria-disabled') === 'true' || sitePage() <= earlierTarget) {
+      earlierTarget = null;
+      updateEarlier();
+      return;
+    }
+    loading = true;
+    pendingSig = gridSig();
+    lastLoadAt = Date.now();
+    muteSiteScroll(15000);
+    btn.click();
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => {
+      loading = false;
+      earlierTarget = null;
+      muteSiteScrollUntil = Date.now() + 2000;
+      updateEarlier(); // the button reads "Load page N" again, so another tap retries
+    }, 12000);
   }
 
   // A different list (Hot/New switch, filter change) rather than more of the same one?
@@ -766,11 +822,15 @@
   let lastLoadAt = 0;
   let gapTimer = null;
 
+  // After loading earlier pages the site sits on one of them, so its Next steps through pages
+  // the feed already has before reaching a new one.
+  const behind = () => !!feed && sitePage() < pageNo;
+
   function loadMore() {
-    if (!src.active() || loading || !feed) return;
+    if (!src.active() || loading || !feed || earlierTarget) return;
     const wait = lastLoadAt + MIN_GAP - Date.now();
     if (wait > 0) {
-      if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; if (targetPage || (sentinelNear() && userScrolledSince(lastLoadAt))) loadMore(); }, wait);
+      if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; if (targetPage || behind() || (sentinelNear() && userScrolledSince(lastLoadAt))) loadMore(); }, wait);
       return;
     }
     const btn = src.next();
@@ -781,7 +841,7 @@
     }
     loading = true;
     pendingSig = gridSig();
-    status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : 'Loading…';
+    status.textContent = targetPage ? `Loading page ${pageNo + 1} of ${targetPage}…` : behind() ? `Loading page ${pageNo + 1}…` : 'Loading…';
     // Your own scrolling is never locked (an old "snap back down" guard trapped you at the
     // bottom); only the site's jump to its section is ignored.
     lastLoadAt = Date.now();
@@ -814,7 +874,12 @@
         harvest();
         muteSiteScrollUntil = Date.now() + 3000; // the site's jump comes just after it renders
         // No chaining unless jumping to a page: the next page loads only when you scroll near the end again.
-        if (targetPage) {
+        if (earlierTarget) {
+          if (sitePage() <= earlierTarget) { earlierTarget = null; updateEarlier(); }
+          else setTimeout(loadEarlier, 300);
+        } else if (behind()) {
+          setTimeout(loadMore, 300); // still on a page we have; keep going to the next new one
+        } else if (targetPage) {
           if (pageNo >= targetPage) finishJump(targetPage);
           else setTimeout(loadMore, 300); // one page at a time, gently
         }
