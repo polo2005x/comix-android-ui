@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.8
+// @version      0.9.9
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -1208,12 +1208,16 @@
         const res = await fetch(href, { credentials: 'same-origin' });
         if (!res.ok) return '';
         const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        // The page ships its data as JSON (#initial-data): queries["manga","detail",id].synopsis.
+        let synopsis = '';
+        try {
+          const data = JSON.parse($('#initial-data', doc)?.textContent || '{}');
+          synopsis = Object.values(data.queries || {}).map((q) => q && typeof q.synopsis === 'string' ? q.synopsis.trim() : '').find(Boolean) || '';
+        } catch (_) { /* fall back to the description tags */ }
         const generic = siteDesc();
-        const metas = ['meta[property="og:description"]', 'meta[name="description"]', 'meta[name="twitter:description"]']
+        const metas = ['meta[name="description"]', 'meta[property="og:description"]']
           .map((q) => doc.querySelector(q)?.content?.trim() || '');
-        const blocks = $$('[class*="synopsis" i], [class*="description" i], [class*="summary" i]', doc)
-          .map((n) => n.textContent.trim()).sort((p, q) => q.length - p.length);
-        return [...blocks, ...metas].find((t) => t.length > 20 && t !== generic) || '';
+        return [synopsis, ...metas].find((t) => t.length > 20 && t !== generic) || '';
       } catch (_) { return ''; }
     })();
     descCache.set(href, job);
