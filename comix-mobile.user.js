@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.6
+// @version      0.9.7
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -179,6 +179,11 @@
   /* long-press a card -> the site's own "Add to library" menu (placed at your finger) */
   html.cx-on main a.card { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .card__menu-pop { z-index: 2147483002 !important; }
+  #cx-ltitle {
+    position: fixed; z-index: 2147483002; box-sizing: border-box; padding: 8px 11px; border-radius: 10px;
+    background: rgba(20, 20, 26, .97); color: #f2f2f6; border: 1px solid rgba(139, 124, 255, .45);
+    font: 600 13.5px/1.3 system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); pointer-events: none; overflow-wrap: anywhere;
+  }
   #cx-toast {
     position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 2147483002; max-width: calc(100vw - 32px);
     padding: 10px 14px; border-radius: 10px; background: rgba(20, 20, 26, .95); color: #e6e6ec;
@@ -1136,15 +1141,32 @@
     return null;
   }
 
-  function placeMenu(x, y) {
+  // The menu gets the full title in a box just above it (cover titles are cut to two lines).
+  let titleWatch;
+  function placeMenu(x, y, title) {
     const pop = $$('.card__menu-pop').pop();
     if (!pop) return;
+    $('#cx-ltitle')?.remove();
+    clearInterval(titleWatch);
     const r = pop.getBoundingClientRect();
+    const box = title ? el('div', { id: 'cx-ltitle', textContent: title }) : null;
+    let gap = 0;
+    if (box) {
+      box.style.width = `${Math.min(innerWidth - 16, Math.max(r.width, 220))}px`;
+      document.body.appendChild(box);
+      gap = box.getBoundingClientRect().height + 6;
+    }
     const left = Math.max(8, Math.min(x - r.width / 2, innerWidth - r.width - 8));
-    const top = Math.max(56, Math.min(y + 10, innerHeight - r.height - 8));
+    const top = Math.max(56 + gap, Math.min(y + 10, innerHeight - r.height - 8));
     for (const [k, v] of [['left', `${left}px`], ['top', `${top}px`], ['right', 'auto'], ['bottom', 'auto'], ['transform', 'none']]) {
       pop.style.setProperty(k, v, 'important');
     }
+    if (!box) return;
+    const w = box.getBoundingClientRect().width;
+    box.style.left = `${Math.max(8, Math.min(left, innerWidth - w - 8))}px`;
+    box.style.top = `${top - gap}px`;
+    // gone with the menu (picked an option, tapped outside, scrolled away)
+    titleWatch = setInterval(() => { if (!pop.isConnected || !pop.getClientRects().length) { box.remove(); clearInterval(titleWatch); } }, 150);
   }
 
   document.addEventListener('contextmenu', (e) => {
@@ -1156,8 +1178,9 @@
     if (!btn) { toast('Open this title to add it to your library'); return; }
     navigator.vibrate?.(15);
     const { clientX: x, clientY: y } = e;
+    const title = ($('.card__title', a)?.textContent || '').trim();
     btn.click();
-    requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y)));
+    requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y, title)));
   }, true);
 
   // ---------- open titles and collections in a new tab ----------
