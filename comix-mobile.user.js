@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.7
+// @version      0.9.8
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -176,14 +176,31 @@
   a.card[data-cx-state="caught"]:hover .card__poster-wrap, a.card[data-cx-state="caught"]:focus-visible .card__poster-wrap,
   a.card[data-cx-state="caught"]:hover .card__title, a.card[data-cx-state="caught"]:focus-visible .card__title { opacity: .85; }
 
-  /* long-press a card -> the site's own "Add to library" menu (placed at your finger) */
-  html.cx-on main a.card { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  .card__menu-pop { z-index: 2147483002 !important; }
-  #cx-ltitle {
-    position: fixed; z-index: 2147483002; box-sizing: border-box; padding: 8px 11px; border-radius: 10px;
-    background: rgba(20, 20, 26, .97); color: #f2f2f6; border: 1px solid rgba(139, 124, 255, .45);
-    font: 600 13.5px/1.3 system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); pointer-events: none; overflow-wrap: anywhere;
+  /* + on the cover's top-right corner -> the site's own "Add to library" menu. Drawn here and
+     caught by a tap in that corner, since the site's own button doesn't work on feed copies. */
+  html.cx-on main a.card .card__menu { display: none !important; }
+  html.cx-on main a.card .card__poster-wrap { position: relative !important; }
+  html.cx-on main a.card .card__poster-wrap::after {
+    content: '+'; position: absolute; top: 4px; right: 4px; z-index: 2; width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; pointer-events: none;
+    background: rgba(12, 12, 16, .72); color: #fff; font: 700 18px/1 system-ui, sans-serif;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .25);
   }
+  .card__menu-pop { z-index: 2147483002 !important; }
+
+  /* long-press a card -> full title with its description above it */
+  html.cx-on main a.card { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #cx-info {
+    position: fixed; left: 8px; right: 8px; z-index: 2147483002; display: flex; flex-direction: column; gap: 6px;
+    max-width: 480px; margin: 0 auto; font-family: system-ui, sans-serif;
+  }
+  #cx-info > div {
+    box-sizing: border-box; padding: 9px 12px; border-radius: 10px; background: rgba(20, 20, 26, .97); color: #f2f2f6;
+    border: 1px solid rgba(139, 124, 255, .45); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); overflow-wrap: anywhere;
+  }
+  #cx-info .cx-desc { font-size: 13px; line-height: 1.45; color: #d6d6de; max-height: 45vh; overflow-y: auto; white-space: pre-line; }
+  #cx-info .cx-desc.cx-loading { color: #8f8f9c; font-style: italic; }
+  #cx-info .cx-ttl { font-size: 14px; line-height: 1.3; font-weight: 700; }
   #cx-toast {
     position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 2147483002; max-width: calc(100vw - 32px);
     padding: 10px 14px; border-radius: 10px; background: rgba(20, 20, 26, .95); color: #e6e6ec;
@@ -1119,9 +1136,8 @@
     else if (t instanceof Element && (t.contains(feedWrap) || t.contains(mainCol()) || t.contains($('main')))) scroller = t;
   }, { capture: true, passive: true });
 
-  // ---------- long-press a card: the site's "Add to library" menu ----------
-  // A long press on a link fires "contextmenu" (right-click on desktop). Use it to press the
-  // card's own (hidden) library button, then move the site's menu to where you pressed.
+  // ---------- + on the cover: the site's "Add to library" menu ----------
+  // Presses the card's own (hidden) library button, then moves the site's menu next to the +.
   function toast(text) {
     $('#cx-toast')?.remove();
     const t = el('div', { id: 'cx-toast', textContent: text });
@@ -1141,46 +1157,104 @@
     return null;
   }
 
-  // The menu gets the full title in a box just above it (cover titles are cut to two lines).
-  let titleWatch;
-  function placeMenu(x, y, title) {
+  function placeMenu(x, y) {
     const pop = $$('.card__menu-pop').pop();
     if (!pop) return;
-    $('#cx-ltitle')?.remove();
-    clearInterval(titleWatch);
     const r = pop.getBoundingClientRect();
-    const box = title ? el('div', { id: 'cx-ltitle', textContent: title }) : null;
-    let gap = 0;
-    if (box) {
-      box.style.width = `${Math.min(innerWidth - 16, Math.max(r.width, 220))}px`;
-      document.body.appendChild(box);
-      gap = box.getBoundingClientRect().height + 6;
-    }
     const left = Math.max(8, Math.min(x - r.width / 2, innerWidth - r.width - 8));
-    const top = Math.max(56 + gap, Math.min(y + 10, innerHeight - r.height - 8));
+    const top = Math.max(56, Math.min(y + 10, innerHeight - r.height - 8));
     for (const [k, v] of [['left', `${left}px`], ['top', `${top}px`], ['right', 'auto'], ['bottom', 'auto'], ['transform', 'none']]) {
       pop.style.setProperty(k, v, 'important');
     }
-    if (!box) return;
-    const w = box.getBoundingClientRect().width;
-    box.style.left = `${Math.max(8, Math.min(left, innerWidth - w - 8))}px`;
-    box.style.top = `${top - gap}px`;
-    // gone with the menu (picked an option, tapped outside, scrolled away)
-    titleWatch = setInterval(() => { if (!pop.isConnected || !pop.getClientRects().length) { box.remove(); clearInterval(titleWatch); } }, 150);
   }
+
+  function openLibrary(a, x, y) {
+    const btn = libraryButtonFor(a);
+    if (!btn) { toast('Open this title to add it to your library'); return; }
+    closeInfo();
+    btn.click();
+    requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y)));
+  }
+
+  // The + drawn on each cover (CSS, so the site's cards aren't changed): a tap in that corner
+  // opens the site's Add to library menu instead of the title.
+  const PLUS = 34; // tap area in the cover's top-right corner, px
+  function plusHit(e) {
+    const a = e.target.closest?.('main a.card');
+    const pw = a && $('.card__poster-wrap', a);
+    if (!pw) return null;
+    const r = pw.getBoundingClientRect();
+    return e.clientX >= r.right - PLUS && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.top + PLUS ? a : null;
+  }
+  document.addEventListener('click', (e) => {
+    if (!root.classList.contains('cx-on') || e.target.closest?.('button')) return;
+    const a = plusHit(e);
+    if (!a) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = $('.card__poster-wrap', a).getBoundingClientRect();
+    openLibrary(a, r.right - PLUS / 2, r.top + PLUS);
+  }, true);
+
+  // ---------- long-press a card: full title + description ----------
+  // The description isn't on the cards, so it's read from the title's own page (the same
+  // request as opening it), once per title, and only when you long-press.
+  const descCache = new Map();
+  const siteDesc = () => $('meta[name="description"]')?.content?.trim() || '';
+  async function fetchDesc(href) {
+    if (descCache.has(href)) return descCache.get(href);
+    const job = (async () => {
+      try {
+        const res = await fetch(href, { credentials: 'same-origin' });
+        if (!res.ok) return '';
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        const generic = siteDesc();
+        const metas = ['meta[property="og:description"]', 'meta[name="description"]', 'meta[name="twitter:description"]']
+          .map((q) => doc.querySelector(q)?.content?.trim() || '');
+        const blocks = $$('[class*="synopsis" i], [class*="description" i], [class*="summary" i]', doc)
+          .map((n) => n.textContent.trim()).sort((p, q) => q.length - p.length);
+        return [...blocks, ...metas].find((t) => t.length > 20 && t !== generic) || '';
+      } catch (_) { return ''; }
+    })();
+    descCache.set(href, job);
+    const text = await job;
+    if (!text) descCache.delete(href); // try again next time
+    return text;
+  }
+
+  let infoBox = null;
+  function closeInfo() { infoBox?.remove(); infoBox = null; }
+  function place(box, y) {
+    const h = box.getBoundingClientRect().height;
+    box.style.top = `${Math.max(56, Math.min(y - h - 12, innerHeight - h - 8))}px`;
+  }
+  function showInfo(a, y) {
+    closeInfo();
+    const href = a.getAttribute('href');
+    const title = ($('.card__title', a)?.textContent || '').trim();
+    const desc = el('div', { className: 'cx-desc cx-loading', textContent: 'Loading description…' });
+    infoBox = el('div', { id: 'cx-info' }, desc, el('div', { className: 'cx-ttl', textContent: title }));
+    document.body.appendChild(infoBox);
+    place(infoBox, y);
+    const box = infoBox;
+    fetchDesc(href).then((text) => {
+      if (box !== infoBox) return;
+      desc.classList.remove('cx-loading');
+      desc.textContent = text || 'No description found.';
+      place(box, y);
+    });
+  }
+  // closes on a tap anywhere else, or when you scroll the page
+  document.addEventListener('pointerdown', (e) => { if (infoBox && !infoBox.contains(e.target)) closeInfo(); }, true);
+  document.addEventListener('scroll', (e) => { if (infoBox && !infoBox.contains(e.target)) closeInfo(); }, true);
 
   document.addEventListener('contextmenu', (e) => {
     if (!root.classList.contains('cx-on')) return;
     const a = e.target.closest?.('main a.card');
     if (!a) return;
     e.preventDefault();
-    const btn = libraryButtonFor(a);
-    if (!btn) { toast('Open this title to add it to your library'); return; }
     navigator.vibrate?.(15);
-    const { clientX: x, clientY: y } = e;
-    const title = ($('.card__title', a)?.textContent || '').trim();
-    btn.click();
-    requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y, title)));
+    showInfo(a, e.clientY);
   }, true);
 
   // ---------- open titles and collections in a new tab ----------
