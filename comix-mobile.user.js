@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.9
+// @version      0.10.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -62,6 +62,21 @@
     }
     window.addEventListener('popstate', check);
     setInterval(check, 500);
+  }
+
+  // Opened from a feed card's + whose site card is gone (comix.to/title/…#cx-library): open
+  // the title page's own Follow menu (Reading, Completed, …) as soon as it's there.
+  if (location.pathname.startsWith('/title/') && location.hash === '#cx-library') {
+    history.replaceState(history.state, '', location.pathname + location.search);
+    const until = Date.now() + 15000;
+    const tryOpen = setInterval(() => {
+      const btn = [...document.querySelectorAll('.mpage__follow-btn')].find((b) => b.getClientRects().length && b.getBoundingClientRect().width);
+      if (btn) {
+        clearInterval(tryOpen);
+        btn.scrollIntoView({ block: 'center' });
+        if (btn.getAttribute('aria-expanded') !== 'true') btn.click();
+      } else if (Date.now() > until) clearInterval(tryOpen);
+    }, 250);
   }
 
   if (!page()) return;
@@ -1170,7 +1185,17 @@
 
   function openLibrary(a, x, y) {
     const btn = libraryButtonFor(a);
-    if (!btn) { toast('Open this title to add it to your library'); return; }
+    if (!btn) {
+      // The site only keeps cards for the page it's on, so older feed pages have no button to
+      // press. Open the title in a new tab instead, with its Follow menu already open there.
+      const link = el('a', { href: `${a.getAttribute('href')}#cx-library`, target: '_blank', rel: 'noopener' });
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast('Opened the title in a new tab with its library menu');
+      return;
+    }
     closeInfo();
     btn.click();
     requestAnimationFrame(() => requestAnimationFrame(() => placeMenu(x, y)));
