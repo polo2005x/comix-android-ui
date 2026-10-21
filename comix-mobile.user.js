@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.9.5
+// @version      0.9.6
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -22,6 +22,7 @@
   const PRESETS_KEY = 'cx-browse-presets';
   const PROGRESS_KEY = 'cx-read-progress'; // { "/title/…": { r: read, t: total, at } } from Reading History
   const SHOW_PROGRESS_KEY = 'cx-mobile-progress';
+  const OVERLAY_KEY = 'cx-mobile-overlay'; // titles drawn on the cover instead of under it
   const COLS = 3;
 
   // `title` finds the home section by the start of its heading.
@@ -86,6 +87,7 @@
   const root = document.documentElement;
   root.classList.add('cx-on');
   root.classList.toggle('cx-showhdr', !!load(HEADER_KEY, false));
+  root.classList.toggle('cx-overlay', load(OVERLAY_KEY, true));
   root.dataset.cxPage = page();
 
   // ---------- styles ----------
@@ -187,6 +189,22 @@
   html.cx-on .cx-active a.card, #cx-feed a.card, .list-grid--cards a.card { min-width: 0; }
   html.cx-on .cx-active .card__title, #cx-feed .card__title, .list-grid--cards .card__title { font-size: 12px !important; line-height: 1.25 !important; }
   html.cx-on .cx-active .card__meta, #cx-feed .card__meta, .list-grid--cards .card__meta { font-size: 10.5px !important; gap: 4px !important; }
+
+  /* title on the bottom of the cover, leaving only chapter + time under it. The card becomes a
+     one-column grid and the boxes around the title are flattened (display: contents), so the
+     title can share the cover's cell without depending on how deep the site nests it. */
+  html.cx-on.cx-overlay a.card { display: grid !important; grid-template-columns: minmax(0, 1fr); align-content: start; }
+  html.cx-on.cx-overlay a.card :is(*:has(.card__title)):not(.card__poster-wrap) { display: contents !important; }
+  html.cx-on.cx-overlay a.card .card__poster-wrap { grid-row: 1; grid-column: 1; }
+  html.cx-on.cx-overlay a.card .card__title {
+    grid-row: 1; grid-column: 1; align-self: end; z-index: 1; position: relative; margin: 0 !important;
+    padding: 16px 5px 4px !important; border-radius: 0 0 8px 8px; pointer-events: none;
+    background: linear-gradient(to top, rgba(0, 0, 0, .88), rgba(0, 0, 0, .55) 60%, transparent);
+    color: #fff !important; font-size: 11px !important; line-height: 1.2 !important; font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .9);
+    display: -webkit-box !important; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal !important;
+  }
+  html.cx-on.cx-overlay a.card .card__meta { grid-column: 1; margin-top: 3px !important; }
 
   #cx-status { text-align: center; padding: 18px 0 28px; font: 13px system-ui, sans-serif; opacity: .65; }
 
@@ -477,6 +495,14 @@
       el('div', { className: 'cx-row' }, el('label', {}, progBox, 'Show read / latest chapter on cards')),
       el('p', { textContent: `Learned from your Reading History while logged in (${Object.keys(progress).length} titles so far). Highlighted when there are new chapters.` }),
     );
+
+    settings.append(el('h3', { textContent: 'Cards' }));
+    const ovBox = el('input', { type: 'checkbox', checked: root.classList.contains('cx-overlay') });
+    ovBox.addEventListener('change', () => {
+      root.classList.toggle('cx-overlay', ovBox.checked);
+      save(OVERLAY_KEY, ovBox.checked);
+    });
+    settings.append(el('div', { className: 'cx-row' }, el('label', {}, ovBox, 'Title on the cover (more compact)')));
 
     settings.append(el('h3', { textContent: 'Troubleshooting' }));
     const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
