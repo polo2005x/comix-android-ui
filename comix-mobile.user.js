@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.10.0
+// @version      0.10.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -171,16 +171,21 @@
      The site's text stays in place (hidden); the label is drawn from an attribute, so the
      site's own page code never sees its card changed. */
   .card__ch[data-cx-read] { font-size: 0 !important; }
+  /* "2m ago" -> "2m" (same attribute trick), and the time drops under the chapter when they don't fit */
+  .card__time[data-cx-time] { font-size: 0 !important; }
+  .card__time[data-cx-time]::before { content: attr(data-cx-time); font-size: 10.5px; }
+  html.cx-on main a.card .card__meta { flex-wrap: wrap !important; row-gap: 1px !important; min-width: 0; }
   /* drawn as a pill: purple with an eye while behind, green with a check once caught up */
   .card__ch[data-cx-read]::before {
-    content: attr(data-cx-read); display: inline-block; font-size: 12px; line-height: 1.5; font-weight: 800;
-    padding: 1px 7px 1px 20px; border-radius: 999px; color: #5ee08f;
-    background: rgba(46, 204, 113, .18) no-repeat 5px center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235ee08f' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12.5l5 5L20 6.5'/%3E%3C/svg%3E");
+    content: attr(data-cx-read); display: inline-block; font-size: 11px; line-height: 1.5; font-weight: 800;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em; white-space: nowrap;
+    padding: 0 5px 0 15px; border-radius: 999px; color: #5ee08f;
+    background: rgba(46, 204, 113, .18) no-repeat 4px center / 9px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235ee08f' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12.5l5 5L20 6.5'/%3E%3C/svg%3E");
     box-shadow: inset 0 0 0 1px rgba(94, 224, 143, .55);
   }
   .card__ch[data-cx-read].cx-new::before {
     color: #fff; box-shadow: 0 0 8px rgba(139, 124, 255, .7);
-    background: #7c6cff no-repeat 5px center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+    background: #7c6cff no-repeat 3px center / 10px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
   }
   /* whole card: started but behind = outlined cover; read up to the latest = dimmed
      (cover and title only, so the green label stays readable) */
@@ -613,6 +618,12 @@
 
   function decorateProgress(scope = document) {
     for (const a of $$('main a.card', scope)) {
+      const time = $('.card__time', a);
+      if (time) {
+        const short = time.textContent.replace(/\s*ago\s*$/i, '').trim();
+        if (short !== time.textContent.trim()) { if (time.getAttribute('data-cx-time') !== short) time.setAttribute('data-cx-time', short); }
+        else if (time.hasAttribute('data-cx-time')) time.removeAttribute('data-cx-time');
+      }
       const ch = $('.card__ch', a);
       if (!ch) continue;
       const text = ch.textContent;
@@ -624,7 +635,7 @@
       }
       const latestM = text.match(/(\d+(?:\.\d+)?)/); // "Ch.1245" on the card is the newest chapter
       const latest = latestM ? +latestM[1] : p.t;
-      const label = `${p.r} / ${latest}`;
+      const label = `${p.r}/${latest}`;
       if (ch.getAttribute('data-cx-read') !== label) ch.setAttribute('data-cx-read', label);
       ch.classList.toggle('cx-new', p.r < latest);
       // Whole-card state: outlined while behind, dimmed once caught up.
