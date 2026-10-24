@@ -1293,6 +1293,7 @@
     el('span', { className: 'cx-chiplabel', textContent: label }), ...list.map((t) => el('span', { className: 'cx-chip', textContent: t })));
   function showInfo(a, y) {
     closeInfo();
+    scrollFromInside = false;
     const href = a.getAttribute('href');
     const title = ($('.card__title', a)?.textContent || '').trim();
     const desc = el('div', { className: 'cx-desc cx-loading', textContent: 'Loading description…' });
@@ -1316,13 +1317,14 @@
   // Closes on a tap or a scroll outside the windows. Scrolling inside one (even past its end,
   // which moves the page underneath) keeps them open.
   const inWindow = (t) => !!(infoBox && t instanceof Node && [...infoBox.children].some((w) => w.contains(t)));
-  let insideUntil = 0;
-  const noteInside = (e) => { if (inWindow(e.target)) insideUntil = Date.now() + 600; };
-  for (const type of ['touchstart', 'touchmove', 'wheel']) document.addEventListener(type, noteInside, { capture: true, passive: true });
-  document.addEventListener('touchend', (e) => { if (inWindow(e.target)) insideUntil = Date.now() + 1200; }, { capture: true, passive: true }); // momentum
+  // Whichever you last touched or wheeled over (a window or the page) owns the scrolling that
+  // follows, however long it glides on.
+  let scrollFromInside = false;
+  const noteInput = (e) => { if (infoBox) scrollFromInside = inWindow(e.target); };
+  for (const type of ['touchstart', 'touchmove', 'wheel']) document.addEventListener(type, noteInput, { capture: true, passive: true });
   document.addEventListener('pointerdown', (e) => { if (infoBox && !inWindow(e.target)) closeInfo(); }, true);
   document.addEventListener('scroll', (e) => {
-    if (!infoBox || (e.target instanceof Node && infoBox.contains(e.target)) || Date.now() < insideUntil) return;
+    if (!infoBox || (e.target instanceof Node && infoBox.contains(e.target)) || scrollFromInside) return;
     closeInfo();
   }, true);
 
