@@ -21,6 +21,7 @@ Userscript for comix.to on phones (home page and /browse):
 - Tapping a title or collection opens it in a new tab.
 - **+ on each cover** (top-right corner; turn off in ⚙ → Cards) opens the site's own Add to library menu: Reading, Completed, On-Hold, Plan to Read, Dropped. On older Hot/New feed pages the site no longer has its own card for that title, so the + opens the title in a new tab with its Follow menu (same options) already open.
 - **Long-press a card** (right-click on desktop) to see three windows: the description, then its genres and tags, then the full title. They are read from the title's page the first time you long-press it (the same request as opening it). They close when you tap or scroll outside them; scrolling inside one keeps them open.
+- **Tag highlights** (⚙ → Tag highlights): keep a **Highlight** list and a **Warn** list of genres/tags, each with its own color. In the long-press window, matching genres and tags are colored and moved first, a ⚠ / ★ line lists the matches, and the tags window gets a warn-colored border. Warn wins if a tag is in both. The search box suggests tags you've already seen in long-press windows. Matching only happens in the long-press window, so it never makes extra requests to the site.
 
 Only runs on `https://comix.to/` and `https://comix.to/browse`. Title and reader pages are left alone.
 

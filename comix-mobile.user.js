@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.10.3
+// @version      0.11.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -24,6 +24,8 @@
   const SHOW_PROGRESS_KEY = 'cx-mobile-progress';
   const OVERLAY_KEY = 'cx-mobile-overlay'; // titles drawn on the cover instead of under it
   const PLUS_KEY = 'cx-mobile-plus'; // + (add to library) on each cover
+  const TAGHL_KEY = 'cx-tag-highlights'; // { hl: [...], warn: [...], hlColor, warnColor }
+  const KNOWN_TAGS_KEY = 'cx-known-tags'; // genre/tag names seen in long-press windows (search suggestions)
   const COLS = 3;
 
   // `title` finds the home section by the start of its heading.
@@ -226,6 +228,12 @@
   #cx-info .cx-chiprow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   #cx-info .cx-chiplabel { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9a9aa6; margin-right: 2px; }
   #cx-info .cx-chip { font-size: 11.5px; line-height: 1.3; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .08); color: #e2e2ea; }
+  #cx-info .cx-chip.cx-hl, #cx-info .cx-genres .cx-chip.cx-hl { background: var(--cx-hl); color: #fff; font-weight: 700; }
+  #cx-info .cx-chip.cx-warn, #cx-info .cx-genres .cx-chip.cx-warn { background: var(--cx-warn); color: #fff; font-weight: 700; }
+  #cx-info .cx-tags.cx-haswarn { border-color: var(--cx-warn); box-shadow: 0 0 0 1px var(--cx-warn), 0 8px 24px rgba(0, 0, 0, .5); }
+  #cx-info .cx-tagsum { font-size: 12.5px; font-weight: 700; line-height: 1.35; }
+  #cx-info .cx-tagsum.cx-warn { color: var(--cx-warn); }
+  #cx-info .cx-tagsum.cx-hl { color: var(--cx-hl); }
   #cx-info .cx-genres .cx-chip { background: rgba(139, 124, 255, .22); color: #ded8ff; }
   #cx-info .cx-ttl { font-size: 14px; line-height: 1.3; font-weight: 700; }
   #cx-toast {
@@ -335,6 +343,15 @@
   .cx-save { display: flex; gap: 6px; margin-top: 8px; }
   .cx-save input { flex: 1; min-width: 0; padding: 9px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #111116; color: #fff; font: inherit; }
   .cx-save button { padding: 9px 14px; border: 0; border-radius: 8px; background: #8b7cff; color: #fff; font: inherit; }
+  .cx-tagset .cx-save button { padding: 9px 8px; white-space: nowrap; }
+  .cx-tagset .cx-warnbtn { background: #e5484d; }
+  .cx-taglist { margin-top: 10px; }
+  .cx-taghead { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .cx-taghead input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid rgba(255, 255, 255, .25); border-radius: 6px; background: none; }
+  .cx-tagchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .cx-tagchip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border-radius: 999px; color: #fff; font-size: 12.5px; font-weight: 600; }
+  .cx-tagdel { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .3); color: #fff; font-size: 11px; line-height: 20px; }
+  .cx-tagnone { font-size: 12px; opacity: .5; }
 
   /* page badge + go-to box, bottom left */
   #cx-pagebox { position: fixed; left: 10px; bottom: 12px; z-index: 2147483000; font: 600 13px system-ui, sans-serif; }
@@ -561,6 +578,8 @@
       el('div', { className: 'cx-row' }, el('label', {}, plusBox, '+ on covers (add to library)')),
     );
 
+    settings.append(el('h3', { textContent: 'Tag highlights' }), tagSettings());
+
     settings.append(el('h3', { textContent: 'Troubleshooting' }));
     const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
     dbgBox.addEventListener('change', () => setDebug(dbgBox.checked));
@@ -574,6 +593,58 @@
       if (native) native.click();
     });
     settings.append(siteBtn);
+  }
+
+  // ---------- tag highlights (shown in the long-press window) ----------
+  const tagHl = { hl: [], warn: [], hlColor: '#2fbf71', warnColor: '#e5484d', ...load(TAGHL_KEY, {}) };
+  const normTag = (t) => String(t).trim().toLowerCase();
+  const tagMatch = (name) => {
+    const n = normTag(name);
+    return tagHl.warn.some((t) => normTag(t) === n) ? 'warn' : tagHl.hl.some((t) => normTag(t) === n) ? 'hl' : null; // warn wins
+  };
+  const saveTagHl = () => save(TAGHL_KEY, tagHl);
+
+  // Its own box, so adding or removing a tag redraws just this part of the settings.
+  function tagSettings() {
+    const box = el('div', { className: 'cx-tagset' });
+    const draw = () => {
+      box.textContent = '';
+      const input = el('input', { type: 'text', placeholder: 'Tag or genre, e.g. Isekai', autocomplete: 'off' });
+      input.setAttribute('list', 'cx-tagnames');
+      const names = el('datalist', { id: 'cx-tagnames' }, ...load(KNOWN_TAGS_KEY, []).map((t) => el('option', { value: t })));
+      const add = (kind) => {
+        const t = input.value.trim();
+        if (!t) return;
+        tagHl.hl = tagHl.hl.filter((x) => normTag(x) !== normTag(t)); // a tag sits in one list only
+        tagHl.warn = tagHl.warn.filter((x) => normTag(x) !== normTag(t));
+        tagHl[kind].push(t);
+        saveTagHl();
+        draw();
+        $('input[type=text]', box)?.focus();
+      };
+      const warnBtn = el('button', { type: 'button', className: 'cx-warnbtn', textContent: '+ Warn' });
+      warnBtn.addEventListener('click', () => add('warn'));
+      const form = el('form', { className: 'cx-save' }, input, el('button', { type: 'submit', textContent: '+ Highlight' }), warnBtn);
+      form.addEventListener('submit', (e) => { e.preventDefault(); add('hl'); });
+      box.append(form, names);
+      for (const [kind, label, colorKey] of [['hl', 'Highlight', 'hlColor'], ['warn', 'Warn', 'warnColor']]) {
+        const color = el('input', { type: 'color', value: tagHl[colorKey], title: `${label} color` });
+        color.addEventListener('change', () => { tagHl[colorKey] = color.value; saveTagHl(); draw(); });
+        const chips = tagHl[kind].map((t) => {
+          const x = el('button', { type: 'button', className: 'cx-tagdel', textContent: '✕', title: `Remove ${t}` });
+          x.addEventListener('click', () => { tagHl[kind] = tagHl[kind].filter((y) => y !== t); saveTagHl(); draw(); });
+          const chip = el('span', { className: 'cx-tagchip' }, t, x);
+          chip.style.background = tagHl[colorKey];
+          return chip;
+        });
+        box.append(el('div', { className: 'cx-taglist' },
+          el('label', { className: 'cx-taghead' }, color, `${label} (${tagHl[kind].length})`),
+          el('div', { className: `cx-tagchips cx-tagchips-${kind}` }, ...(chips.length ? chips : [el('span', { className: 'cx-tagnone', textContent: 'none yet' })]))));
+      }
+      box.append(el('p', { textContent: 'Long-press a card to see its genres and tags: matches are colored and listed first, and Warn wins over Highlight. Suggestions come from tags you\u2019ve seen there.' }));
+    };
+    draw();
+    return box;
   }
 
   function moveTab(i, dir) {
@@ -1289,8 +1360,20 @@
     const h = box.getBoundingClientRect().height;
     box.style.top = `${Math.max(56, Math.min(y - h - 12, innerHeight - h - 8))}px`;
   }
+  // matched tags first, colored by their list
+  const rank = (t) => ({ warn: 0, hl: 1 })[tagMatch(t)] ?? 2;
   const chips = (label, list, cls = '') => el('div', { className: `cx-chiprow ${cls}` },
-    el('span', { className: 'cx-chiplabel', textContent: label }), ...list.map((t) => el('span', { className: 'cx-chip', textContent: t })));
+    el('span', { className: 'cx-chiplabel', textContent: label }),
+    ...list.map((t, i) => [t, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([t]) => {
+      const m = tagMatch(t);
+      return el('span', { className: m ? `cx-chip cx-${m}` : 'cx-chip', textContent: t });
+    }));
+  function rememberTags(list) {
+    const known = load(KNOWN_TAGS_KEY, []);
+    const seen = new Set(known.map(normTag));
+    const fresh = list.filter((t) => !seen.has(normTag(t)) && seen.add(normTag(t)));
+    if (fresh.length) save(KNOWN_TAGS_KEY, [...known, ...fresh].sort((a, b) => a.localeCompare(b)).slice(0, 3000));
+  }
   function showInfo(a, y) {
     closeInfo();
     scrollFromInside = false;
@@ -1299,6 +1382,8 @@
     const desc = el('div', { className: 'cx-desc cx-loading', textContent: 'Loading description…' });
     const tags = el('div', { className: 'cx-tags cx-loading', textContent: 'Loading genres and tags…' });
     infoBox = el('div', { id: 'cx-info' }, desc, tags, el('div', { className: 'cx-ttl', textContent: title }));
+    infoBox.style.setProperty('--cx-hl', tagHl.hlColor);
+    infoBox.style.setProperty('--cx-warn', tagHl.warnColor);
     document.body.appendChild(infoBox);
     place(infoBox, y);
     const box = infoBox;
@@ -1308,6 +1393,13 @@
       desc.textContent = info.desc || 'No description found.';
       tags.classList.remove('cx-loading');
       tags.textContent = '';
+      rememberTags([...info.genres, ...info.tags]);
+      const all = [...info.genres, ...info.tags];
+      const warned = all.filter((t) => tagMatch(t) === 'warn');
+      const liked = all.filter((t) => tagMatch(t) === 'hl');
+      if (warned.length) tags.append(el('div', { className: 'cx-tagsum cx-warn', textContent: `⚠ ${warned.join(', ')}` }));
+      if (liked.length) tags.append(el('div', { className: 'cx-tagsum cx-hl', textContent: `★ ${liked.join(', ')}` }));
+      tags.classList.toggle('cx-haswarn', warned.length > 0);
       if (info.genres.length) tags.append(chips('Genres', info.genres, 'cx-genres'));
       if (info.tags.length) tags.append(chips('Tags', info.tags));
       if (!tags.childNodes.length) tags.textContent = 'No genres or tags found.';
