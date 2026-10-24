@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.10.2
+// @version      0.10.3
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -1320,8 +1320,8 @@
   // Whichever you last touched or wheeled over (a window or the page) owns the scrolling that
   // follows, however long it glides on.
   let scrollFromInside = false;
-  const noteInput = (e) => { if (infoBox) scrollFromInside = inWindow(e.target); };
-  for (const type of ['touchstart', 'touchmove', 'wheel']) document.addEventListener(type, noteInput, { capture: true, passive: true });
+  const noteInfoInput = (e) => { if (infoBox) scrollFromInside = inWindow(e.target); };
+  for (const type of ['touchstart', 'touchmove', 'wheel']) document.addEventListener(type, noteInfoInput, { capture: true, passive: true });
   document.addEventListener('pointerdown', (e) => { if (infoBox && !inWindow(e.target)) closeInfo(); }, true);
   document.addEventListener('scroll', (e) => {
     if (!infoBox || (e.target instanceof Node && infoBox.contains(e.target)) || scrollFromInside) return;
