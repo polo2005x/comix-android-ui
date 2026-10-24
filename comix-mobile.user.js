@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.11.0
+// @version      0.11.1
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -80,6 +80,83 @@
         if (btn.getAttribute('aria-expanded') !== 'true') btn.click();
       } else if (Date.now() > until) clearInterval(tryOpen);
     }, 250);
+  }
+
+  // Title pages: ＋ (Highlight) and − (Warn) inside each genre/tag chip, and chips already in
+  // your lists tinted. Drawn with CSS and caught by where you tap, so the site's own elements
+  // only get an attribute. Runs on every comix.to page, since the site switches between titles
+  // without reloading; it only does anything on /title/ pages. Once per page, like the rest.
+  if (!document.documentElement.hasAttribute('data-cx-tagui')) {
+    document.documentElement.setAttribute('data-cx-tagui', '');
+    const KEY = 'cx-tag-highlights';
+    const KNOWN = 'cx-known-tags';
+    const read = () => {
+      const c = { hl: [], warn: [], hlColor: '#2fbf71', warnColor: '#e5484d' };
+      try { Object.assign(c, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (_) {}
+      return c;
+    };
+    const write = (c) => { try { localStorage.setItem(KEY, JSON.stringify(c)); } catch (_) {} };
+    const norm = (t) => String(t).trim().toLowerCase();
+    const CHIP = 'a.mpage__chip[href*="genres_in="], a.mpage__chip[href*="demos="]';
+    const onTitle = () => { try { return location.pathname.startsWith('/title/'); } catch (_) { return false; } };
+    const style = document.createElement('style');
+    style.textContent = `
+      a.mpage__chip[data-cx-tag] { padding-right: 3px !important; column-gap: 0 !important; }
+      a.mpage__chip[data-cx-tag]::before, a.mpage__chip[data-cx-tag]::after {
+        order: 1; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 17px; margin-left: 4px;
+        border-radius: 999px; background: rgba(255, 255, 255, .14); font: 700 13px/1 system-ui, sans-serif;
+      }
+      a.mpage__chip[data-cx-tag]::before { content: '+'; }
+      a.mpage__chip[data-cx-tag]::after { content: '\\2212'; order: 2; margin-left: 3px; }
+      a.mpage__chip[data-cx-tag="hl"] { background: var(--cx-hl) !important; color: #fff !important; }
+      a.mpage__chip[data-cx-tag="hl"]::before { content: '\\2713'; background: rgba(0, 0, 0, .25); }
+      a.mpage__chip[data-cx-tag="warn"] { background: var(--cx-warn) !important; color: #fff !important; }
+      a.mpage__chip[data-cx-tag="warn"]::after { content: '\\2713'; background: rgba(0, 0, 0, .25); }
+    `;
+    const decorate = () => {
+      if (!onTitle()) return;
+      if (!style.isConnected) document.documentElement.appendChild(style);
+      const c = read();
+      document.documentElement.style.setProperty('--cx-hl', c.hlColor);
+      document.documentElement.style.setProperty('--cx-warn', c.warnColor);
+      const names = [];
+      for (const a of document.querySelectorAll(CHIP)) {
+        const n = norm(a.textContent);
+        names.push(a.textContent.trim());
+        const st = c.warn.some((t) => norm(t) === n) ? 'warn' : c.hl.some((t) => norm(t) === n) ? 'hl' : 'none';
+        if (a.getAttribute('data-cx-tag') !== st) a.setAttribute('data-cx-tag', st);
+      }
+      // they also feed the suggestions in ⚙ → Tag highlights
+      try {
+        const known = JSON.parse(localStorage.getItem(KNOWN) || '[]');
+        const seen = new Set(known.map(norm));
+        const fresh = names.filter((t) => t && !seen.has(norm(t)) && seen.add(norm(t)));
+        if (fresh.length) localStorage.setItem(KNOWN, JSON.stringify([...known, ...fresh].sort((x, y) => x.localeCompare(y)).slice(0, 3000)));
+      } catch (_) {}
+    };
+    // The two controls sit at the chip's right end: − in the last 23px, ＋ just before it.
+    // A tap there toggles the tag in that list (a tag sits in one list only) instead of opening Browse.
+    document.addEventListener('click', (e) => {
+      const a = onTitle() && e.target.closest?.(CHIP);
+      if (!a || !a.hasAttribute('data-cx-tag')) return;
+      const r = a.getBoundingClientRect();
+      if (e.clientX < r.right - 49) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const kind = e.clientX >= r.right - 25 ? 'warn' : 'hl';
+      const name = a.textContent.trim();
+      const c = read();
+      const had = c[kind].some((t) => norm(t) === norm(name));
+      c.hl = c.hl.filter((t) => norm(t) !== norm(name));
+      c.warn = c.warn.filter((t) => norm(t) !== norm(name));
+      if (!had) c[kind].push(name);
+      write(c);
+      decorate();
+    }, true);
+    let soon;
+    new MutationObserver(() => { if (onTitle()) { clearTimeout(soon); soon = setTimeout(decorate, 150); } })
+      .observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener('storage', (e) => { if (e.key === KEY) decorate(); });
   }
 
   if (!page()) return;
