@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.10.1
+// @version      0.10.2
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -23,6 +23,7 @@
   const PROGRESS_KEY = 'cx-read-progress'; // { "/title/…": { r: read, t: total, at } } from Reading History
   const SHOW_PROGRESS_KEY = 'cx-mobile-progress';
   const OVERLAY_KEY = 'cx-mobile-overlay'; // titles drawn on the cover instead of under it
+  const PLUS_KEY = 'cx-mobile-plus'; // + (add to library) on each cover
   const COLS = 3;
 
   // `title` finds the home section by the start of its heading.
@@ -103,6 +104,7 @@
   root.classList.add('cx-on');
   root.classList.toggle('cx-showhdr', !!load(HEADER_KEY, false));
   root.classList.toggle('cx-overlay', load(OVERLAY_KEY, true));
+  root.classList.toggle('cx-plus', load(PLUS_KEY, true));
   root.dataset.cxPage = page();
 
   // ---------- styles ----------
@@ -200,7 +202,7 @@
      caught by a tap in that corner, since the site's own button doesn't work on feed copies. */
   html.cx-on main a.card .card__menu { display: none !important; }
   html.cx-on main a.card .card__poster-wrap { position: relative !important; }
-  html.cx-on main a.card .card__poster-wrap::after {
+  html.cx-on.cx-plus main a.card .card__poster-wrap::after {
     content: '+'; position: absolute; top: 4px; right: 4px; z-index: 2; width: 24px; height: 24px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center; pointer-events: none;
     background: rgba(12, 12, 16, .72); color: #fff; font: 700 18px/1 system-ui, sans-serif;
@@ -218,8 +220,13 @@
     box-sizing: border-box; padding: 9px 12px; border-radius: 10px; background: rgba(20, 20, 26, .97); color: #f2f2f6;
     border: 1px solid rgba(139, 124, 255, .45); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); overflow-wrap: anywhere;
   }
-  #cx-info .cx-desc { font-size: 13px; line-height: 1.45; color: #d6d6de; max-height: 45vh; overflow-y: auto; white-space: pre-line; }
-  #cx-info .cx-desc.cx-loading { color: #8f8f9c; font-style: italic; }
+  #cx-info .cx-desc { font-size: 13px; line-height: 1.45; color: #d6d6de; max-height: 38vh; overflow-y: auto; white-space: pre-line; overscroll-behavior: contain; }
+  #cx-info .cx-tags { max-height: 24vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; }
+  #cx-info .cx-loading { color: #8f8f9c; font-size: 13px; font-style: italic; }
+  #cx-info .cx-chiprow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  #cx-info .cx-chiplabel { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9a9aa6; margin-right: 2px; }
+  #cx-info .cx-chip { font-size: 11.5px; line-height: 1.3; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .08); color: #e2e2ea; }
+  #cx-info .cx-genres .cx-chip { background: rgba(139, 124, 255, .22); color: #ded8ff; }
   #cx-info .cx-ttl { font-size: 14px; line-height: 1.3; font-weight: 700; }
   #cx-toast {
     position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 2147483002; max-width: calc(100vw - 32px);
@@ -544,7 +551,15 @@
       root.classList.toggle('cx-overlay', ovBox.checked);
       save(OVERLAY_KEY, ovBox.checked);
     });
-    settings.append(el('div', { className: 'cx-row' }, el('label', {}, ovBox, 'Title on the cover (more compact)')));
+    const plusBox = el('input', { type: 'checkbox', checked: root.classList.contains('cx-plus') });
+    plusBox.addEventListener('change', () => {
+      root.classList.toggle('cx-plus', plusBox.checked);
+      save(PLUS_KEY, plusBox.checked);
+    });
+    settings.append(
+      el('div', { className: 'cx-row' }, el('label', {}, ovBox, 'Title on the cover (more compact)')),
+      el('div', { className: 'cx-row' }, el('label', {}, plusBox, '+ on covers (add to library)')),
+    );
 
     settings.append(el('h3', { textContent: 'Troubleshooting' }));
     const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
@@ -1223,7 +1238,7 @@
     return e.clientX >= r.right - PLUS && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.top + PLUS ? a : null;
   }
   document.addEventListener('click', (e) => {
-    if (!root.classList.contains('cx-on') || e.target.closest?.('button')) return;
+    if (!root.classList.contains('cx-on') || !root.classList.contains('cx-plus') || e.target.closest?.('button')) return;
     const a = plusHit(e);
     if (!a) return;
     e.preventDefault();
@@ -1232,34 +1247,40 @@
     openLibrary(a, r.right - PLUS / 2, r.top + PLUS);
   }, true);
 
-  // ---------- long-press a card: full title + description ----------
-  // The description isn't on the cards, so it's read from the title's own page (the same
-  // request as opening it), once per title, and only when you long-press.
-  const descCache = new Map();
+  // ---------- long-press a card: description, genres/tags and full title ----------
+  // None of that is on the cards, so it's read from the title's own page (the same request as
+  // opening it), once per title, and only when you long-press. The page ships its data as JSON
+  // (#initial-data): queries["manga","detail",id] has synopsis, genres, demographics, formats, tags.
+  const infoCache = new Map();
   const siteDesc = () => $('meta[name="description"]')?.content?.trim() || '';
-  async function fetchDesc(href) {
-    if (descCache.has(href)) return descCache.get(href);
+  const names = (list) => (Array.isArray(list) ? list : []).map((t) => (typeof t === 'string' ? t : t?.title || t?.name || '')).filter(Boolean);
+  async function fetchInfo(href) {
+    if (infoCache.has(href)) return infoCache.get(href);
     const job = (async () => {
+      const info = { desc: '', genres: [], tags: [] };
       try {
         const res = await fetch(href, { credentials: 'same-origin' });
-        if (!res.ok) return '';
+        if (!res.ok) return info;
         const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-        // The page ships its data as JSON (#initial-data): queries["manga","detail",id].synopsis.
-        let synopsis = '';
+        let detail = null;
         try {
           const data = JSON.parse($('#initial-data', doc)?.textContent || '{}');
-          synopsis = Object.values(data.queries || {}).map((q) => q && typeof q.synopsis === 'string' ? q.synopsis.trim() : '').find(Boolean) || '';
+          detail = Object.values(data.queries || {}).find((q) => q && typeof q === 'object' && ('synopsis' in q || 'genres' in q)) || null;
         } catch (_) { /* fall back to the description tags */ }
         const generic = siteDesc();
-        const metas = ['meta[name="description"]', 'meta[property="og:description"]']
-          .map((q) => doc.querySelector(q)?.content?.trim() || '');
-        return [synopsis, ...metas].find((t) => t.length > 20 && t !== generic) || '';
-      } catch (_) { return ''; }
+        const metas = ['meta[name="description"]', 'meta[property="og:description"]'].map((q) => doc.querySelector(q)?.content?.trim() || '');
+        info.desc = [typeof detail?.synopsis === 'string' ? detail.synopsis.trim() : '', ...metas].find((t) => t.length > 20 && t !== generic) || '';
+        if (detail) {
+          info.genres = [...new Set([...names(detail.genres), ...names(detail.demographics)])];
+          info.tags = [...new Set([...names(detail.formats), ...names(detail.tags)])].filter((t) => !info.genres.includes(t));
+        }
+      } catch (_) { /* network trouble: shown as not found */ }
+      return info;
     })();
-    descCache.set(href, job);
-    const text = await job;
-    if (!text) descCache.delete(href); // try again next time
-    return text;
+    infoCache.set(href, job);
+    const info = await job;
+    if (!info.desc && !info.genres.length && !info.tags.length) infoCache.delete(href); // try again next time
+    return info;
   }
 
   let infoBox = null;
@@ -1268,25 +1289,42 @@
     const h = box.getBoundingClientRect().height;
     box.style.top = `${Math.max(56, Math.min(y - h - 12, innerHeight - h - 8))}px`;
   }
+  const chips = (label, list, cls = '') => el('div', { className: `cx-chiprow ${cls}` },
+    el('span', { className: 'cx-chiplabel', textContent: label }), ...list.map((t) => el('span', { className: 'cx-chip', textContent: t })));
   function showInfo(a, y) {
     closeInfo();
     const href = a.getAttribute('href');
     const title = ($('.card__title', a)?.textContent || '').trim();
     const desc = el('div', { className: 'cx-desc cx-loading', textContent: 'Loading description…' });
-    infoBox = el('div', { id: 'cx-info' }, desc, el('div', { className: 'cx-ttl', textContent: title }));
+    const tags = el('div', { className: 'cx-tags cx-loading', textContent: 'Loading genres and tags…' });
+    infoBox = el('div', { id: 'cx-info' }, desc, tags, el('div', { className: 'cx-ttl', textContent: title }));
     document.body.appendChild(infoBox);
     place(infoBox, y);
     const box = infoBox;
-    fetchDesc(href).then((text) => {
+    fetchInfo(href).then((info) => {
       if (box !== infoBox) return;
       desc.classList.remove('cx-loading');
-      desc.textContent = text || 'No description found.';
+      desc.textContent = info.desc || 'No description found.';
+      tags.classList.remove('cx-loading');
+      tags.textContent = '';
+      if (info.genres.length) tags.append(chips('Genres', info.genres, 'cx-genres'));
+      if (info.tags.length) tags.append(chips('Tags', info.tags));
+      if (!tags.childNodes.length) tags.textContent = 'No genres or tags found.';
       place(box, y);
     });
   }
-  // closes on a tap anywhere else, or when you scroll the page
-  document.addEventListener('pointerdown', (e) => { if (infoBox && !infoBox.contains(e.target)) closeInfo(); }, true);
-  document.addEventListener('scroll', (e) => { if (infoBox && !infoBox.contains(e.target)) closeInfo(); }, true);
+  // Closes on a tap or a scroll outside the windows. Scrolling inside one (even past its end,
+  // which moves the page underneath) keeps them open.
+  const inWindow = (t) => !!(infoBox && t instanceof Node && [...infoBox.children].some((w) => w.contains(t)));
+  let insideUntil = 0;
+  const noteInside = (e) => { if (inWindow(e.target)) insideUntil = Date.now() + 600; };
+  for (const type of ['touchstart', 'touchmove', 'wheel']) document.addEventListener(type, noteInside, { capture: true, passive: true });
+  document.addEventListener('touchend', (e) => { if (inWindow(e.target)) insideUntil = Date.now() + 1200; }, { capture: true, passive: true }); // momentum
+  document.addEventListener('pointerdown', (e) => { if (infoBox && !inWindow(e.target)) closeInfo(); }, true);
+  document.addEventListener('scroll', (e) => {
+    if (!infoBox || (e.target instanceof Node && infoBox.contains(e.target)) || Date.now() < insideUntil) return;
+    closeInfo();
+  }, true);
 
   document.addEventListener('contextmenu', (e) => {
     if (!root.classList.contains('cx-on')) return;
