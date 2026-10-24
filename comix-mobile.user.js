@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Comix Mobile Feed
 // @namespace    comix-android-ui
-// @version      0.11.1
+// @version      0.12.0
 // @description  Sticky tab bar with configurable, reorderable home sections, 3-column grid, endless Latest Updates and Browse, page jump, browse presets.
 // @match        https://comix.to/*
 // @run-at       document-start
@@ -24,8 +24,6 @@
   const SHOW_PROGRESS_KEY = 'cx-mobile-progress';
   const OVERLAY_KEY = 'cx-mobile-overlay'; // titles drawn on the cover instead of under it
   const PLUS_KEY = 'cx-mobile-plus'; // + (add to library) on each cover
-  const TAGHL_KEY = 'cx-tag-highlights'; // { hl: [...], warn: [...], hlColor, warnColor }
-  const KNOWN_TAGS_KEY = 'cx-known-tags'; // genre/tag names seen in long-press windows (search suggestions)
   const COLS = 3;
 
   // `title` finds the home section by the start of its heading.
@@ -82,81 +80,135 @@
     }, 250);
   }
 
-  // Title pages: ＋ (Highlight) and − (Warn) inside each genre/tag chip, and chips already in
-  // your lists tinted. Drawn with CSS and caught by where you tap, so the site's own elements
-  // only get an attribute. Runs on every comix.to page, since the site switches between titles
-  // without reloading; it only does anything on /title/ pages. Once per page, like the rest.
+  // ---------- tag groups (settings, the long-press window and title pages share them) ----------
+  // Stored as { groups: [{ id, name, color, tags: [...] }] }. A tag sits in one group only.
+  // Older versions kept two lists ({ hl, warn, hlColor, warnColor }); those become the first
+  // two groups, Warn then Highlight.
+  const TAGS_KEY = 'cx-tag-highlights';
+  const KNOWN_TAGS_KEY = 'cx-known-tags'; // genre/tag names seen so far (suggestions in settings)
+  const GROUP_COLORS = ['#e5484d', '#2fbf71', '#3b82f6', '#f59e0b', '#a855f7', '#ec4899', '#14b8a6', '#eab308'];
+  const tagNorm = (t) => String(t).trim().toLowerCase();
+  const safeColor = (c, i = 0) => (/^#[0-9a-f]{3,8}$/i.test(c) ? c : GROUP_COLORS[i % GROUP_COLORS.length]);
+  const newGroupId = () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  function readTagGroups() {
+    let raw = {};
+    try { raw = JSON.parse(localStorage.getItem(TAGS_KEY) || '{}') || {}; } catch (_) {}
+    if (Array.isArray(raw.groups)) {
+      return raw.groups.filter((g) => g && g.id).map((g, i) => ({
+        id: String(g.id).replace(/[^\w-]/g, ''), name: String(g.name || `Group ${i + 1}`), color: safeColor(g.color, i),
+        tags: Array.isArray(g.tags) ? g.tags.map(String) : [],
+      }));
+    }
+    return [
+      { id: 'warn', name: 'Warn', color: safeColor(raw.warnColor, 0), tags: Array.isArray(raw.warn) ? raw.warn.map(String) : [] },
+      { id: 'hl', name: 'Highlight', color: safeColor(raw.hlColor, 1), tags: Array.isArray(raw.hl) ? raw.hl.map(String) : [] },
+    ];
+  }
+  const writeTagGroups = (groups) => { try { localStorage.setItem(TAGS_KEY, JSON.stringify({ groups })); } catch (_) {} };
+  const groupOf = (groups, name) => { const n = tagNorm(name); return groups.find((g) => g.tags.some((t) => tagNorm(t) === n)) || null; };
+  // Put a tag in a group (taking it out of any other); the group it's already in takes it off.
+  function toggleTagGroup(groups, name, id) {
+    const was = groupOf(groups, name)?.id;
+    for (const g of groups) g.tags = g.tags.filter((t) => tagNorm(t) !== tagNorm(name));
+    if (was !== id) groups.find((g) => g.id === id)?.tags.push(String(name).trim());
+    writeTagGroups(groups);
+    return groups;
+  }
+  function rememberKnownTags(names) {
+    try {
+      const known = JSON.parse(localStorage.getItem(KNOWN_TAGS_KEY) || '[]');
+      const seen = new Set(known.map(tagNorm));
+      const fresh = names.filter((t) => t && !seen.has(tagNorm(t)) && seen.add(tagNorm(t)));
+      if (fresh.length) localStorage.setItem(KNOWN_TAGS_KEY, JSON.stringify([...known, ...fresh].sort((x, y) => x.localeCompare(y)).slice(0, 3000)));
+    } catch (_) {}
+  }
+
+  // Title pages: a + inside each genre/tag chip opens a small picker of your groups, and chips
+  // already in a group are filled with its color. Drawn with CSS and caught by where you tap,
+  // so the site's own elements only get an attribute. Runs on every comix.to page, since the
+  // site switches between titles without reloading; it only does anything on /title/ pages.
+  // Once per page, like the rest.
   if (!document.documentElement.hasAttribute('data-cx-tagui')) {
     document.documentElement.setAttribute('data-cx-tagui', '');
-    const KEY = 'cx-tag-highlights';
-    const KNOWN = 'cx-known-tags';
-    const read = () => {
-      const c = { hl: [], warn: [], hlColor: '#2fbf71', warnColor: '#e5484d' };
-      try { Object.assign(c, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (_) {}
-      return c;
-    };
-    const write = (c) => { try { localStorage.setItem(KEY, JSON.stringify(c)); } catch (_) {} };
-    const norm = (t) => String(t).trim().toLowerCase();
     const CHIP = 'a.mpage__chip[href*="genres_in="], a.mpage__chip[href*="demos="]';
     const onTitle = () => { try { return location.pathname.startsWith('/title/'); } catch (_) { return false; } };
-    const style = document.createElement('style');
-    style.textContent = `
+    const BASE = `
       a.mpage__chip[data-cx-tag] { padding-right: 3px !important; column-gap: 0 !important; }
-      a.mpage__chip[data-cx-tag]::before, a.mpage__chip[data-cx-tag]::after {
-        order: 1; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 17px; margin-left: 4px;
+      a.mpage__chip[data-cx-tag]::after {
+        content: '+'; order: 1; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 17px; margin-left: 5px;
         border-radius: 999px; background: rgba(255, 255, 255, .14); font: 700 13px/1 system-ui, sans-serif;
       }
-      a.mpage__chip[data-cx-tag]::before { content: '+'; }
-      a.mpage__chip[data-cx-tag]::after { content: '\\2212'; order: 2; margin-left: 3px; }
-      a.mpage__chip[data-cx-tag="hl"] { background: var(--cx-hl) !important; color: #fff !important; }
-      a.mpage__chip[data-cx-tag="hl"]::before { content: '\\2713'; background: rgba(0, 0, 0, .25); }
-      a.mpage__chip[data-cx-tag="warn"] { background: var(--cx-warn) !important; color: #fff !important; }
-      a.mpage__chip[data-cx-tag="warn"]::after { content: '\\2713'; background: rgba(0, 0, 0, .25); }
+      #cx-tagpick {
+        position: fixed; z-index: 2147483003; min-width: 190px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 8px;
+        background: #1b1b22; color: #e6e6ec; border: 1px solid rgba(255, 255, 255, .14); border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, .55); font: 14px system-ui, sans-serif;
+      }
+      #cx-tagpick .cx-pickhead { padding: 2px 6px 8px; font-size: 12px; opacity: .7; overflow-wrap: anywhere; }
+      #cx-tagpick button {
+        display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 8px; border: 0; border-radius: 8px;
+        background: transparent; color: inherit; font: inherit; text-align: left;
+      }
+      #cx-tagpick button:hover, #cx-tagpick button.is-on { background: rgba(255, 255, 255, .08); }
+      #cx-tagpick .cx-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+      #cx-tagpick .cx-check { margin-left: auto; font-weight: 700; }
+      #cx-tagpick .cx-pickempty { padding: 4px 6px; font-size: 13px; opacity: .7; }
     `;
+    const style = document.createElement('style');
     const decorate = () => {
       if (!onTitle()) return;
+      const groups = readTagGroups();
+      // one rule per group, so its chips take its color
+      style.textContent = BASE + groups.map((g) => `
+        a.mpage__chip[data-cx-tag="${g.id}"] { background: ${g.color} !important; color: #fff !important; }
+        a.mpage__chip[data-cx-tag="${g.id}"]::after { content: '\\2713'; background: rgba(0, 0, 0, .25); }`).join('');
       if (!style.isConnected) document.documentElement.appendChild(style);
-      const c = read();
-      document.documentElement.style.setProperty('--cx-hl', c.hlColor);
-      document.documentElement.style.setProperty('--cx-warn', c.warnColor);
       const names = [];
       for (const a of document.querySelectorAll(CHIP)) {
-        const n = norm(a.textContent);
         names.push(a.textContent.trim());
-        const st = c.warn.some((t) => norm(t) === n) ? 'warn' : c.hl.some((t) => norm(t) === n) ? 'hl' : 'none';
+        const st = groupOf(groups, a.textContent)?.id || 'none';
         if (a.getAttribute('data-cx-tag') !== st) a.setAttribute('data-cx-tag', st);
       }
-      // they also feed the suggestions in ⚙ → Tag highlights
-      try {
-        const known = JSON.parse(localStorage.getItem(KNOWN) || '[]');
-        const seen = new Set(known.map(norm));
-        const fresh = names.filter((t) => t && !seen.has(norm(t)) && seen.add(norm(t)));
-        if (fresh.length) localStorage.setItem(KNOWN, JSON.stringify([...known, ...fresh].sort((x, y) => x.localeCompare(y)).slice(0, 3000)));
-      } catch (_) {}
+      rememberKnownTags(names);
     };
-    // The two controls sit at the chip's right end: − in the last 23px, ＋ just before it.
-    // A tap there toggles the tag in that list (a tag sits in one list only) instead of opening Browse.
+
+    let pick = null;
+    const closePick = () => { pick?.remove(); pick = null; };
+    function openPick(a) {
+      closePick();
+      const name = a.textContent.trim();
+      const groups = readTagGroups();
+      const current = groupOf(groups, name)?.id;
+      const mk = (tag, props, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+      pick = mk('div', { id: 'cx-tagpick' }, mk('div', { className: 'cx-pickhead', textContent: `"${name}" →` }));
+      if (!groups.length) pick.append(mk('div', { className: 'cx-pickempty', textContent: 'No tag groups yet: add one in ⚙ → Tag groups on the home page.' }));
+      for (const g of groups) {
+        const dot = mk('span', { className: 'cx-dot' });
+        dot.style.background = g.color;
+        const b = mk('button', { type: 'button', className: g.id === current ? 'is-on' : '' }, dot, g.name, mk('span', { className: 'cx-check', textContent: g.id === current ? '✓' : '' }));
+        b.addEventListener('click', () => { toggleTagGroup(readTagGroups(), name, g.id); closePick(); decorate(); });
+        pick.append(b);
+      }
+      document.body.appendChild(pick);
+      const r = a.getBoundingClientRect();
+      const pr = pick.getBoundingClientRect();
+      pick.style.left = `${Math.max(8, Math.min(r.right - pr.width, innerWidth - pr.width - 8))}px`;
+      pick.style.top = `${r.bottom + 6 + pr.height <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - pr.height - 6)}px`;
+    }
+    // The + sits in the chip's last 30px: a tap there opens the picker instead of Browse.
     document.addEventListener('click', (e) => {
       const a = onTitle() && e.target.closest?.(CHIP);
       if (!a || !a.hasAttribute('data-cx-tag')) return;
-      const r = a.getBoundingClientRect();
-      if (e.clientX < r.right - 49) return;
+      if (e.clientX < a.getBoundingClientRect().right - 30) return;
       e.preventDefault();
       e.stopPropagation();
-      const kind = e.clientX >= r.right - 25 ? 'warn' : 'hl';
-      const name = a.textContent.trim();
-      const c = read();
-      const had = c[kind].some((t) => norm(t) === norm(name));
-      c.hl = c.hl.filter((t) => norm(t) !== norm(name));
-      c.warn = c.warn.filter((t) => norm(t) !== norm(name));
-      if (!had) c[kind].push(name);
-      write(c);
-      decorate();
+      openPick(a);
     }, true);
+    document.addEventListener('pointerdown', (e) => { if (pick && !pick.contains(e.target)) closePick(); }, true);
+    document.addEventListener('scroll', (e) => { if (pick && !(e.target instanceof Node && pick.contains(e.target))) closePick(); }, true);
     let soon;
     new MutationObserver(() => { if (onTitle()) { clearTimeout(soon); soon = setTimeout(decorate, 150); } })
       .observe(document.documentElement, { childList: true, subtree: true });
-    window.addEventListener('storage', (e) => { if (e.key === KEY) decorate(); });
+    window.addEventListener('storage', (e) => { if (e.key === TAGS_KEY) decorate(); });
   }
 
   if (!page()) return;
@@ -305,13 +357,11 @@
   #cx-info .cx-chiprow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   #cx-info .cx-chiplabel { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9a9aa6; margin-right: 2px; }
   #cx-info .cx-chip { font-size: 11.5px; line-height: 1.3; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .08); color: #e2e2ea; }
-  #cx-info .cx-chip.cx-hl, #cx-info .cx-genres .cx-chip.cx-hl { background: var(--cx-hl); color: #fff; font-weight: 700; }
-  #cx-info .cx-chip.cx-warn, #cx-info .cx-genres .cx-chip.cx-warn { background: var(--cx-warn); color: #fff; font-weight: 700; }
-  #cx-info .cx-tags.cx-haswarn { border-color: var(--cx-warn); box-shadow: 0 0 0 1px var(--cx-warn), 0 8px 24px rgba(0, 0, 0, .5); }
+  #cx-info .cx-chip.cx-m { color: #fff; font-weight: 700; }
+  #cx-info .cx-tags.cx-hasmatch { border-color: var(--cx-match); box-shadow: 0 0 0 1px var(--cx-match), 0 8px 24px rgba(0, 0, 0, .5); }
   #cx-info .cx-tagsum { font-size: 12.5px; font-weight: 700; line-height: 1.35; }
-  #cx-info .cx-tagsum.cx-warn { color: var(--cx-warn); }
-  #cx-info .cx-tagsum.cx-hl { color: var(--cx-hl); }
-  #cx-info .cx-genres .cx-chip { background: rgba(139, 124, 255, .22); color: #ded8ff; }
+  #cx-info .cx-sumdot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; vertical-align: 0; }
+  #cx-info .cx-genres .cx-chip:not(.cx-m) { background: rgba(139, 124, 255, .22); color: #ded8ff; }
   #cx-info .cx-ttl { font-size: 14px; line-height: 1.3; font-weight: 700; }
   #cx-toast {
     position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); z-index: 2147483002; max-width: calc(100vw - 32px);
@@ -420,11 +470,13 @@
   .cx-save { display: flex; gap: 6px; margin-top: 8px; }
   .cx-save input { flex: 1; min-width: 0; padding: 9px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #111116; color: #fff; font: inherit; }
   .cx-save button { padding: 9px 14px; border: 0; border-radius: 8px; background: #8b7cff; color: #fff; font: inherit; }
-  .cx-tagset .cx-save button { padding: 9px 8px; white-space: nowrap; }
-  .cx-tagset .cx-warnbtn { background: #e5484d; }
-  .cx-taglist { margin-top: 10px; }
-  .cx-taghead { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-  .cx-taghead input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid rgba(255, 255, 255, .25); border-radius: 6px; background: none; }
+  .cx-tagset .cx-save button { padding: 9px 10px; white-space: nowrap; }
+  .cx-tagset .cx-groupsel { max-width: 92px; padding: 8px 4px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #111116; color: #fff; font: inherit; font-size: 13px; }
+  .cx-taglist { margin-top: 12px; }
+  .cx-taghead { display: flex; align-items: center; gap: 6px; }
+  .cx-taghead input[type=color] { flex: none; width: 30px; height: 30px; padding: 0; border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px; background: none; }
+  .cx-groupname { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .14); background: #111116; color: #fff; font: 600 13px system-ui, sans-serif; }
+  .cx-newgroup { text-align: center !important; margin-top: 12px !important; }
   .cx-tagchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .cx-tagchip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border-radius: 999px; color: #fff; font-size: 12.5px; font-weight: 600; }
   .cx-tagdel { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .3); color: #fff; font-size: 11px; line-height: 20px; }
@@ -655,7 +707,7 @@
       el('div', { className: 'cx-row' }, el('label', {}, plusBox, '+ on covers (add to library)')),
     );
 
-    settings.append(el('h3', { textContent: 'Tag highlights' }), tagSettings());
+    settings.append(el('h3', { textContent: 'Tag groups' }), tagSettings());
 
     settings.append(el('h3', { textContent: 'Troubleshooting' }));
     const dbgBox = el('input', { type: 'checkbox', checked: !!debugEl });
@@ -672,53 +724,69 @@
     settings.append(siteBtn);
   }
 
-  // ---------- tag highlights (shown in the long-press window) ----------
-  const tagHl = { hl: [], warn: [], hlColor: '#2fbf71', warnColor: '#e5484d', ...load(TAGHL_KEY, {}) };
-  const normTag = (t) => String(t).trim().toLowerCase();
-  const tagMatch = (name) => {
-    const n = normTag(name);
-    return tagHl.warn.some((t) => normTag(t) === n) ? 'warn' : tagHl.hl.some((t) => normTag(t) === n) ? 'hl' : null; // warn wins
-  };
-  const saveTagHl = () => save(TAGHL_KEY, tagHl);
-
-  // Its own box, so adding or removing a tag redraws just this part of the settings.
+  // ---------- tag groups in settings ----------
+  // Its own box, so changes redraw just this part of the settings.
   function tagSettings() {
     const box = el('div', { className: 'cx-tagset' });
     const draw = () => {
       box.textContent = '';
-      const input = el('input', { type: 'text', placeholder: 'Tag or genre, e.g. Isekai', autocomplete: 'off' });
-      input.setAttribute('list', 'cx-tagnames');
-      const names = el('datalist', { id: 'cx-tagnames' }, ...load(KNOWN_TAGS_KEY, []).map((t) => el('option', { value: t })));
-      const add = (kind) => {
-        const t = input.value.trim();
-        if (!t) return;
-        tagHl.hl = tagHl.hl.filter((x) => normTag(x) !== normTag(t)); // a tag sits in one list only
-        tagHl.warn = tagHl.warn.filter((x) => normTag(x) !== normTag(t));
-        tagHl[kind].push(t);
-        saveTagHl();
-        draw();
-        $('input[type=text]', box)?.focus();
-      };
-      const warnBtn = el('button', { type: 'button', className: 'cx-warnbtn', textContent: '+ Warn' });
-      warnBtn.addEventListener('click', () => add('warn'));
-      const form = el('form', { className: 'cx-save' }, input, el('button', { type: 'submit', textContent: '+ Highlight' }), warnBtn);
-      form.addEventListener('submit', (e) => { e.preventDefault(); add('hl'); });
-      box.append(form, names);
-      for (const [kind, label, colorKey] of [['hl', 'Highlight', 'hlColor'], ['warn', 'Warn', 'warnColor']]) {
-        const color = el('input', { type: 'color', value: tagHl[colorKey], title: `${label} color` });
-        color.addEventListener('change', () => { tagHl[colorKey] = color.value; saveTagHl(); draw(); });
-        const chips = tagHl[kind].map((t) => {
+      const groups = readTagGroups();
+      const commit = () => { writeTagGroups(groups); draw(); };
+
+      if (groups.length) {
+        const input = el('input', { type: 'text', placeholder: 'Tag or genre, e.g. Isekai', autocomplete: 'off' });
+        input.setAttribute('list', 'cx-tagnames');
+        const which = el('select', { className: 'cx-groupsel' }, ...groups.map((g) => el('option', { value: g.id, textContent: g.name })));
+        if (draw.lastGroup && groups.some((g) => g.id === draw.lastGroup)) which.value = draw.lastGroup;
+        const form = el('form', { className: 'cx-save' }, input, which, el('button', { type: 'submit', textContent: 'Add' }));
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const t = input.value.trim();
+          if (!t) return;
+          draw.lastGroup = which.value;
+          if (groupOf(groups, t)?.id !== which.value) toggleTagGroup(groups, t, which.value);
+          draw();
+          $('.cx-tagset input[type=text]')?.focus();
+        });
+        box.append(form, el('datalist', { id: 'cx-tagnames' }, ...load(KNOWN_TAGS_KEY, []).map((t) => el('option', { value: t }))));
+      }
+
+      groups.forEach((g, i) => {
+        const color = el('input', { type: 'color', value: g.color, title: 'Group color' });
+        color.addEventListener('change', () => { g.color = color.value; commit(); });
+        const name = el('input', { type: 'text', value: g.name, className: 'cx-groupname', title: 'Group name' });
+        name.addEventListener('change', () => { g.name = name.value.trim() || g.name; commit(); });
+        const up = el('button', { type: 'button', className: 'cx-mini', textContent: '▲', disabled: i === 0, title: 'Move up' });
+        up.addEventListener('click', () => { [groups[i - 1], groups[i]] = [groups[i], groups[i - 1]]; commit(); });
+        const down = el('button', { type: 'button', className: 'cx-mini', textContent: '▼', disabled: i === groups.length - 1, title: 'Move down' });
+        down.addEventListener('click', () => { [groups[i + 1], groups[i]] = [groups[i], groups[i + 1]]; commit(); });
+        const del = el('button', { type: 'button', className: 'cx-mini', textContent: '✕', title: 'Delete group' });
+        del.addEventListener('click', () => {
+          if (g.tags.length && !confirm(`Delete the group "${g.name}" and its ${g.tags.length} tag${g.tags.length === 1 ? '' : 's'}?`)) return;
+          groups.splice(i, 1);
+          commit();
+        });
+        const chips = g.tags.map((t) => {
           const x = el('button', { type: 'button', className: 'cx-tagdel', textContent: '✕', title: `Remove ${t}` });
-          x.addEventListener('click', () => { tagHl[kind] = tagHl[kind].filter((y) => y !== t); saveTagHl(); draw(); });
+          x.addEventListener('click', () => { g.tags = g.tags.filter((y) => y !== t); commit(); });
           const chip = el('span', { className: 'cx-tagchip' }, t, x);
-          chip.style.background = tagHl[colorKey];
+          chip.style.background = g.color;
           return chip;
         });
-        box.append(el('div', { className: 'cx-taglist' },
-          el('label', { className: 'cx-taghead' }, color, `${label} (${tagHl[kind].length})`),
-          el('div', { className: `cx-tagchips cx-tagchips-${kind}` }, ...(chips.length ? chips : [el('span', { className: 'cx-tagnone', textContent: 'none yet' })]))));
-      }
-      box.append(el('p', { textContent: 'Long-press a card to see its genres and tags: matches are colored and listed first, and Warn wins over Highlight. Suggestions come from tags you\u2019ve seen there.' }));
+        const group = el('div', { className: 'cx-taglist' },
+          el('div', { className: 'cx-taghead' }, color, name, up, down, del),
+          el('div', { className: 'cx-tagchips' }, ...(chips.length ? chips : [el('span', { className: 'cx-tagnone', textContent: 'no tags yet' })])));
+        group.dataset.group = g.id;
+        box.append(group);
+      });
+
+      const add = el('button', { type: 'button', className: 'cx-wide cx-newgroup', textContent: '+ New group' });
+      add.addEventListener('click', () => {
+        groups.push({ id: newGroupId(), name: `Group ${groups.length + 1}`, color: GROUP_COLORS[groups.length % GROUP_COLORS.length], tags: [] });
+        commit();
+        [...box.querySelectorAll('.cx-groupname')].pop()?.select();
+      });
+      box.append(add, el('p', { textContent: 'Long-press a card to see its genres and tags: tags in a group are filled with its color and listed first, groups higher up first. On a title page, the + on each tag picks its group. Suggestions come from tags you\u2019ve seen.' }));
     };
     draw();
     return box;
@@ -1437,20 +1505,18 @@
     const h = box.getBoundingClientRect().height;
     box.style.top = `${Math.max(56, Math.min(y - h - 12, innerHeight - h - 8))}px`;
   }
-  // matched tags first, colored by their list
-  const rank = (t) => ({ warn: 0, hl: 1 })[tagMatch(t)] ?? 2;
-  const chips = (label, list, cls = '') => el('div', { className: `cx-chiprow ${cls}` },
-    el('span', { className: 'cx-chiplabel', textContent: label }),
-    ...list.map((t, i) => [t, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([t]) => {
-      const m = tagMatch(t);
-      return el('span', { className: m ? `cx-chip cx-${m}` : 'cx-chip', textContent: t });
-    }));
-  function rememberTags(list) {
-    const known = load(KNOWN_TAGS_KEY, []);
-    const seen = new Set(known.map(normTag));
-    const fresh = list.filter((t) => !seen.has(normTag(t)) && seen.add(normTag(t)));
-    if (fresh.length) save(KNOWN_TAGS_KEY, [...known, ...fresh].sort((a, b) => a.localeCompare(b)).slice(0, 3000));
-  }
+  // Tags in a group first (groups higher in the settings first), filled with the group's color.
+  const chips = (label, list, groups, cls = '') => {
+    const rank = (t) => { const g = groupOf(groups, t); return g ? groups.indexOf(g) : groups.length; };
+    return el('div', { className: `cx-chiprow ${cls}` },
+      el('span', { className: 'cx-chiplabel', textContent: label }),
+      ...list.map((t, i) => [t, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([t]) => {
+        const g = groupOf(groups, t);
+        const c = el('span', { className: g ? 'cx-chip cx-m' : 'cx-chip', textContent: t });
+        if (g) c.style.background = g.color;
+        return c;
+      }));
+  };
   function showInfo(a, y) {
     closeInfo();
     scrollFromInside = false;
@@ -1459,8 +1525,6 @@
     const desc = el('div', { className: 'cx-desc cx-loading', textContent: 'Loading description…' });
     const tags = el('div', { className: 'cx-tags cx-loading', textContent: 'Loading genres and tags…' });
     infoBox = el('div', { id: 'cx-info' }, desc, tags, el('div', { className: 'cx-ttl', textContent: title }));
-    infoBox.style.setProperty('--cx-hl', tagHl.hlColor);
-    infoBox.style.setProperty('--cx-warn', tagHl.warnColor);
     document.body.appendChild(infoBox);
     place(infoBox, y);
     const box = infoBox;
@@ -1470,15 +1534,24 @@
       desc.textContent = info.desc || 'No description found.';
       tags.classList.remove('cx-loading');
       tags.textContent = '';
-      rememberTags([...info.genres, ...info.tags]);
       const all = [...info.genres, ...info.tags];
-      const warned = all.filter((t) => tagMatch(t) === 'warn');
-      const liked = all.filter((t) => tagMatch(t) === 'hl');
-      if (warned.length) tags.append(el('div', { className: 'cx-tagsum cx-warn', textContent: `⚠ ${warned.join(', ')}` }));
-      if (liked.length) tags.append(el('div', { className: 'cx-tagsum cx-hl', textContent: `★ ${liked.join(', ')}` }));
-      tags.classList.toggle('cx-haswarn', warned.length > 0);
-      if (info.genres.length) tags.append(chips('Genres', info.genres, 'cx-genres'));
-      if (info.tags.length) tags.append(chips('Tags', info.tags));
+      rememberKnownTags(all);
+      // one line per group with matches, in group order; the window takes the top group's color
+      const groups = readTagGroups();
+      let top = null;
+      for (const g of groups) {
+        const hits = all.filter((t) => groupOf(groups, t) === g);
+        if (!hits.length) continue;
+        top = top || g;
+        const line = el('div', { className: 'cx-tagsum' }, el('span', { className: 'cx-sumdot' }), `${g.name}: ${hits.join(', ')}`);
+        line.style.color = g.color;
+        line.firstChild.style.background = g.color;
+        tags.append(line);
+      }
+      tags.classList.toggle('cx-hasmatch', !!top);
+      if (top) tags.style.setProperty('--cx-match', top.color);
+      if (info.genres.length) tags.append(chips('Genres', info.genres, groups, 'cx-genres'));
+      if (info.tags.length) tags.append(chips('Tags', info.tags, groups));
       if (!tags.childNodes.length) tags.textContent = 'No genres or tags found.';
       place(box, y);
     });
